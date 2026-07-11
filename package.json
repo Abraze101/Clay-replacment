@@ -1,0 +1,39 @@
+{
+  "name": "lead-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless, workflow-driven lead generation engine",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "leads": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "cli": "tsx src/cli/index.ts",
+    "db:migrate": "tsx src/cli/index.ts db migrate",
+    "lint": "eslint .",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.4",
+    "commander": "^15.0.0",
+    "dotenv": "^17.4.2",
+    "pg": "^8.22.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.1",
+    "@types/pg": "^8.20.0",
+    "eslint": "^10.6.0",
+    "tsx": "^4.23.0",
+    "typescript": "^7.0.2",
+    "typescript-eslint": "^8.63.0"
+  }
+}

@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: lead_engine
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d lead_engine"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - lead_engine_postgres:/var/lib/postgresql/data
+
+volumes:
+  lead_engine_postgres:

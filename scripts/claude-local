@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CLAUDE_BIN="${HOME}/.local/bin/claude"
+
+if [[ ! -x "${CLAUDE_BIN}" ]]; then
+  echo "Claude Code is not installed at ${CLAUDE_BIN}." >&2
+  exit 1
+fi
+
+exec "${CLAUDE_BIN}" "$@"

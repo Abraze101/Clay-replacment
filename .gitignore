@@ -1,0 +1,12 @@
+node_modules/
+.pnpm-store/
+dist/
+.data/
+.env
+.env.*
+!.env.example
+.claude/sessions.local.md
+coverage/
+exports/
+*.log
+.DS_Store
