@@ -4,7 +4,7 @@ Status: created 2026-07-10 per `docs/proposals/consolidated-revision-directive.m
 
 This file records vendor, library, and product-structure decisions as lightweight ADR entries. Every entry carries: **Decision / Date / Evidence / Reason / Status / Revisit trigger**. Statuses are `accepted`, `pending`, `deferred`, or `rejected`. No entry is "never relitigate": each has a concrete revisit trigger. Add or update an entry whenever a milestone makes or corrects a vendor/library decision.
 
-**Guardrail note:** LinkedIn scraping, Google Maps scraping, and SERP scraping prohibitions are permanent project guardrails defined in `CLAUDE.md`. They are not ADRs and carry no revisit trigger.
+**Guardrail note:** The LinkedIn-scraping prohibition is a permanent project guardrail defined in `CLAUDE.md`; it is not an ADR and carries no revisit trigger. The former Google Maps/SERP-scraping guardrail was lifted by owner decision on 2026-07-12 — see ADR-023.
 
 Milestone references use the canonical sequence: M0 engine skeleton, M1 harness adapter, M2 minimal UI, M3 local-business workflow, M4 professional + imported workflows, M5 contact enrichment + MiniMax, M6 personal VPS + managed beta.
 
@@ -207,3 +207,13 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Reason:** One supported toolchain for compiler, runner, and type-aware linting beats native-compiler speed at this codebase size; `no-floating-promises` and friends are load-bearing for an async engine.
 - **Status:** accepted
 - **Revisit trigger:** typescript-eslint (or its successor) shipping TypeScript 7 support.
+
+## ADR-023: Firecrawl scraping replaces Google Places for local-business discovery (interim)
+
+- **Decision:** Use Firecrawl as the M3 local-business discovery provider instead of the official Google Places API. Full scrape scope approved by the owner: Firecrawl may scrape Google Maps listings, Google search results, and business websites. The LinkedIn prohibition is untouched and remains permanent. The adapter stays behind the provider-neutral `SourceProvider` interface so an official-API adapter (Google Places, Foursquare, Yelp Fusion) can replace it without engine, workflow, or storage changes.
+- **Date:** 2026-07-12
+- **Evidence:** Owner decision in the M2 wrap-up session, made twice with the risk picture presented (this entry records informed consent, not an engineering recommendation). Supersedes the former CLAUDE.md "permanent guardrail" for Maps/SERP scraping; partially supersedes the compliance-posture rationale in ADR-013 (anti-bot circumvention now happens inside the Firecrawl vendor boundary) and removes ADR-011's "official Google Places API covers M3" premise.
+- **Reason:** Speed to a usable lead flow without Google Cloud billing/API setup; Firecrawl is a single vendor covering search, Maps listings, and site scraping.
+- **Risks accepted by the owner:** Google ToS breach (blocking, account action, and — rarely — civil claims); no Places data-licensing terms means no field-mask billing but also no contractual right to store/display the data; scraped-data freshness and provenance are weaker than API responses; Firecrawl pricing/reliability becomes load-bearing; scraped Maps content (ratings/reviews) has unclear reuse rights in client-facing exports.
+- **Status:** accepted (interim — "for now" per the owner)
+- **Revisit trigger:** Any managed/beta launch or data-resale arrangement (mandatory re-review before serving third parties scraped data); Google blocking or legal contact; Firecrawl pricing/reliability problems; or the DIY release, where shipping a ToS-breaching default to other operators needs its own decision.

@@ -78,24 +78,24 @@ Acceptance:
 
 Deliver:
 
-- Official local-business provider adapter (Google Places API (New)); no scraping.
+- Firecrawl-based local-business discovery adapter (Google Maps listings, search results, business websites) per ADR-023, behind the provider-neutral source interface; details finalized at M3 planning.
 - Category/geography and service-area search inputs.
-- Storage/attribution handling, including restricted-snapshot expiry.
+- Source provenance handling: per-record source URL, retrieved-at, and a stable per-listing identifier (Places-specific storage/attribution and snapshot-expiry rules apply only if an official-API adapter is added).
 - Website-domain normalization and bounded website research through a lean policy-controlled fetcher.
 - Local-business dedupe.
 - Quick List workflow exporting available business details and public main phones without person-level enrichment.
-- Cost previews computed from actual field masks.
+- Cost previews computed from Firecrawl's actual per-request/credit pricing for the planned scrape volume.
 - Shared retry/pause policy and 429 scheduling (first live rate-limited provider; see sequencing note).
-- Migration `0003` (place IDs, timezone, snapshot expiry, resume/next-attempt scheduling).
+- Migration `0003` (source listing IDs, timezone, resume/next-attempt scheduling; exact columns at M3 planning).
 
 Acceptance:
 
 - A roofer campaign returns useful business leads through the CLI, MCP, and UI even when no owner or person record exists.
 - Geographic/query coverage limits are visible; one provider is never presented as complete market coverage.
-- Provider storage/attribution policy tests and documentation exist.
-- Preview costs derive from the actual requested field masks.
+- Every sourced lead carries provenance (source URL, retrieved-at, listing identifier).
+- Preview costs derive from Firecrawl's actual pricing for the planned request volume.
 - Rate-limit responses pause and reschedule instead of failing the run.
-- CI remains fixture-only.
+- CI remains fixture-only (no live Firecrawl credentials or spend).
 
 ## Milestone 4: professional and imported workflows
 

@@ -147,7 +147,7 @@ The MVP prepares lists for human callers; it does not place calls or operate a p
 ### Sources
 
 - Apollo people/company search for professional leads.
-- Google Places Text/Nearby Search or another approved local-business source for local discovery.
+- Firecrawl-based local discovery (Google Maps listings, search results, and business websites) per ADR-023; a provider-neutral adapter keeps an official-API source (Google Places, Foursquare, Yelp Fusion) as the drop-in replacement path.
 - CSV/domain/URL import.
 - Public business-website research with clear crawl limits.
 - Provider adapters must respect licensing, attribution, caching, and storage rules.
@@ -224,7 +224,7 @@ Every operation has strict input/output schemas and returns structured JSON suit
 - A full Clay spreadsheet/formula engine.
 - Arbitrary code execution inside workflows.
 - LinkedIn scraping or messaging automation.
-- Google Maps scraping; local-business sourcing uses official APIs only.
+- Scraping platforms other than those ADR-023 permits (Google Maps/SERP via Firecrawl); LinkedIn scraping stays permanently prohibited.
 - Autonomous outbound sending.
 - Predictive dialing or placing calls.
 - Meta Ads campaign creation, optimization, or consumer lead inbox management.

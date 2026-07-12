@@ -107,7 +107,7 @@ The runner supports linear steps and simple conditions. A full arbitrary DAG is 
 
 `Places/local source -> normalize -> dedupe -> website research -> optional Apollo enrichment -> local-business score -> personalize -> review -> export`
 
-Google Places Text Search supports category/location queries and can include pure service-area businesses. Requested fields determine billing, and Places content has storage/attribution restrictions. The adapter must persist stable place identifiers and handle other content according to the current Google Maps Platform policies.
+Per ADR-023, the M3 source adapter is Firecrawl-based (Google Maps listings, search results, and business websites) rather than the official Places API. The adapter must still persist a stable per-listing identifier, record source URL and retrieved-at metadata for provenance, and stay behind the provider-neutral `SourceProvider` interface so an official-API adapter can replace it without engine changes. Scraped-content freshness and reuse rights are weaker than API data — see the risk list in ADR-023.
 
 The public business phone returned by the source is stored as `business_main`, not assumed to be an owner's direct number. Quick List stops after permitted source fields, normalization, and dedupe. Call-Ready and Full may continue into person/contact discovery and validation after preview and approval.
 
@@ -269,11 +269,11 @@ The application reports whether a required provider is connected without exposin
 
 ## Safety and compliance baseline
 
-- No LinkedIn scraping or automated LinkedIn actions.
-- No Google Maps scraping; local-business data comes only from the official Places API or another approved provider.
+- No LinkedIn scraping or automated LinkedIn actions (permanent).
+- Local-business discovery uses Firecrawl-based scraping of Google Maps listings, search results, and business websites (owner decision, ADR-023 — interim; re-review is mandatory before any managed/beta launch or data resale).
 - No consumer/patient targeting using health conditions or sensitive health data.
 - Public-site research is rate-limited, respects robots/terms, and targets business pages only.
-- Google Places integration follows current caching, storage, display, and attribution rules.
+- If an official Places-API adapter is (re)introduced, it follows current caching, storage, display, and attribution rules.
 - Paid provider steps require an explicit approval gate.
 - Provider credentials stay server-side and out of LLM prompts.
 - LLM output is structured and grounded in saved evidence.
