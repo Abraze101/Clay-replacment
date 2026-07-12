@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "data": {
+    "markdown": "# Austin Roofing Co\n\nFamily-owned roofing contractor serving Austin since 1998. Free estimates, insured crews, residential and commercial roof repair and replacement.",
+    "metadata": {
+      "title": "Austin Roofing Co — Roof Repair & Replacement",
+      "description": "Family-owned Austin roofing contractor. Free estimates.",
+      "sourceURL": "https://austinroofingco.example",
+      "statusCode": 200
+    }
+  }
+}

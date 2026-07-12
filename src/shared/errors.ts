@@ -16,6 +16,7 @@ export type ErrorCode =
   | "MIGRATION_CHECKSUM_MISMATCH"
   | "PROVIDER_ERROR"
   | "PROVIDER_AMBIGUOUS_OUTCOME"
+  | "PROVIDER_RATE_LIMITED"
   | "EXPORT_FAILED"
   | "INTERNAL";
 
@@ -36,6 +37,23 @@ export class RetryableProviderError extends AppError {
   constructor(message: string, details: Record<string, unknown> = {}) {
     super("PROVIDER_ERROR", message, details);
     this.name = "RetryableProviderError";
+  }
+}
+
+/**
+ * The provider rejected the request because of rate limiting (HTTP 429). By
+ * definition uncharged and NOT a spent attempt: the run pauses
+ * (pause_reason='rate_limited'), records resume_at, and reschedules. Carries
+ * the delay to wait before retrying (from a Retry-After header when present, or
+ * a provider-specific default otherwise).
+ */
+export class RateLimitError extends AppError {
+  readonly retryAfterSeconds: number;
+
+  constructor(message: string, retryAfterSeconds: number, details: Record<string, unknown> = {}) {
+    super("PROVIDER_RATE_LIMITED", message, details);
+    this.name = "RateLimitError";
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 

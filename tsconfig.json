@@ -15,6 +15,6 @@
     "outDir": "dist",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "spikes/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "spikes/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["dist", "node_modules"]
 }

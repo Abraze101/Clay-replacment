@@ -68,7 +68,12 @@ export async function exportRun(
     const snapshot = item.snapshot as {
       enrichment?: { personName?: string; title?: string };
       sourceRetrievedAt?: string;
+      source?: { sourceUrl?: string };
+      normalized?: { rating?: number | null; reviewCount?: number | null };
     };
+    const rating = snapshot.normalized?.rating ?? null;
+    const reviewCount = snapshot.normalized?.reviewCount ?? null;
+    const sourceUrl = snapshot.source?.sourceUrl ?? null;
 
     rows.push({
       business_name: lead.display_name,
@@ -79,6 +84,9 @@ export async function exportRun(
       locality: lead.locality,
       region: lead.region,
       country: lead.country,
+      timezone: lead.timezone,
+      rating,
+      review_count: reviewCount,
       business_main_phone: businessMain?.raw_value ?? null,
       business_main_phone_e164: businessMain?.normalized_value ?? null,
       business_main_phone_format_valid: businessMain ? (businessMain.format_valid ?? null) : null,
@@ -95,6 +103,7 @@ export async function exportRun(
       suppression_status: "unchecked",
       source_provider: lead.source_provider,
       source_record_id: lead.source_provider_id,
+      source_url: sourceUrl,
       retrieved_at: snapshot.sourceRetrievedAt ?? null,
       run_item_id: item.id,
     });
@@ -104,6 +113,10 @@ export async function exportRun(
       reviewStatus: item.review_status,
       score: item.score === null ? null : num(item.score),
       leadId: lead.id,
+      timezone: lead.timezone,
+      rating,
+      reviewCount,
+      sourceUrl,
       suppression: "unchecked",
       contactPoints: contactPoints
         .map((cp) => ({

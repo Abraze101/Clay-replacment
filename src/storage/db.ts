@@ -14,6 +14,9 @@ export type DbKind = "pglite" | "pg";
 export interface Db {
   readonly kind: DbKind;
   readonly kysely: Kysely<Database>;
+  /** Raw driver handle for the pg-boss JobQueue adapter (fromPglite/fromKysely). Set per kind. */
+  readonly pglite?: PGlite;
+  readonly pool?: pg.Pool;
   rawExec(sql: string): Promise<void>;
   close(): Promise<void>;
 }
@@ -33,6 +36,7 @@ export async function connectDb(databaseUrl: string): Promise<Db> {
     return {
       kind: "pglite",
       kysely,
+      pglite,
       rawExec: async (sql) => {
         await pglite.exec(sql);
       },
@@ -49,6 +53,7 @@ export async function connectDb(databaseUrl: string): Promise<Db> {
     return {
       kind: "pg",
       kysely,
+      pool,
       rawExec: async (sql) => {
         // Simple-protocol multi-statement query; Postgres wraps it in an
         // implicit transaction unless the SQL manages its own.

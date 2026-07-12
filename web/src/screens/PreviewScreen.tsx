@@ -74,12 +74,18 @@ export function PreviewScreen({ flow, onBack }: { flow: NewRunFlow; onBack: () =
           <p className="muted">None — this plan spends no credits.</p>
         ) : (
           <ul className="plain-list">
-            {paidActions.map((action) => (
-              <li key={action.stepId}>
-                <strong>{action.stepId}</strong> via {action.provider}: up to {action.count} records ×{" "}
-                {action.costPerRecord} = {action.count * action.costPerRecord} credits
-              </li>
-            ))}
+            {paidActions.map((action) => {
+              // A paid source is billed per search request; item steps per record.
+              const isSource = plan.steps.find((s) => s.id === action.stepId)?.type === "source";
+              const unit = isSource ? "search request" : "record";
+              return (
+                <li key={action.stepId}>
+                  <strong>{action.stepId}</strong> via {action.provider}: up to {action.count} {unit}
+                  {action.count === 1 ? "" : "s"} × {action.costPerRecord} ={" "}
+                  {action.count * action.costPerRecord} credits
+                </li>
+              );
+            })}
           </ul>
         )}
         <p>

@@ -34,6 +34,8 @@ export interface NewLead {
   normalizedPhone?: string | null;
   sourceProvider?: string | null;
   sourceProviderId?: string | null;
+  placeId?: string | null;
+  timezone?: string | null;
 }
 
 /** Identity lookup #1: provider-neutral discovery identity (hard unique). */
@@ -107,6 +109,8 @@ export async function insertLead(db: Kysely<Database>, lead: NewLead): Promise<L
       normalized_phone: lead.normalizedPhone ?? null,
       source_provider: lead.sourceProvider ?? null,
       source_provider_id: lead.sourceProviderId ?? null,
+      place_id: lead.placeId ?? null,
+      timezone: lead.timezone ?? null,
       metadata: toJson({}),
     })
     .onConflict((oc) => oc.doNothing())

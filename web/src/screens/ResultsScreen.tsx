@@ -137,6 +137,14 @@ export function ResultsScreen({ runId }: { runId: string }): ReactElement {
               Review below, then continue the run — export only includes approved, completed leads.
             </p>
           )}
+          {status.sourceCoverage.some((c) => c.coverageNote) && (
+            <p className="muted">
+              {status.sourceCoverage
+                .filter((c) => c.coverageNote)
+                .map((c) => c.coverageNote)
+                .join(" ")}
+            </p>
+          )}
         </section>
       )}
       {error && <p className="error-banner">{error}</p>}

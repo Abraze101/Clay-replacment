@@ -32,6 +32,9 @@ importers:
       pg:
         specifier: ^8.22.0
         version: 8.22.0
+      pg-boss:
+        specifier: 12.25.1
+        version: 12.25.1
       tldts:
         specifier: 7.4.8
         version: 7.4.8
@@ -66,9 +69,6 @@ importers:
       eslint-plugin-react-hooks:
         specifier: ^7.1.1
         version: 7.1.1(eslint@10.6.0)
-      pg-boss:
-        specifier: 12.25.1
-        version: 12.25.1
       react:
         specifier: ^19.2.7
         version: 19.2.7

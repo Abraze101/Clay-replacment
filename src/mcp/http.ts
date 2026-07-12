@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 import type { AppContainer } from "../app/container.js";
-import { createContainer } from "../app/container.js";
+import { createContainer, defaultJobDriver } from "../app/container.js";
+import { PgBossRunWorker } from "../jobs/pg-boss-worker.js";
 import { migrate } from "../storage/migrate.js";
 import { buildMcpServer } from "./server.js";
 
@@ -97,8 +98,11 @@ export async function startMcpHttpServer(
 }
 
 async function main(): Promise<void> {
-  const app = await createContainer({ actor: "mcp:unknown" });
+  // Long-lived entry: default to the pg-boss driver so delayed rate-limit
+  // resumes fire without blocking tool calls (JOB_DRIVER overrides).
+  const app = await createContainer({ actor: "mcp:unknown", jobDriver: defaultJobDriver("pgboss") });
   await migrate(app.db);
+  if (app.worker instanceof PgBossRunWorker) await app.worker.start();
   const server = await startMcpHttpServer(app, {
     port: app.env.MCP_HTTP_PORT,
     bearerToken: app.env.MCP_HTTP_TOKEN,

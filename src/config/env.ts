@@ -19,7 +19,21 @@ const envSchema = z.object({
   MCP_HTTP_TOKEN: z.string().optional(),
   WEB_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   MAX_STEP_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
-  // Provider keys are optional in M0 (never used; fake providers only).
+  // Background-job driver; long-lived entries default to pgboss, one-shot CLI to inprocess.
+  JOB_DRIVER: z.enum(["inprocess", "pgboss"]).optional(),
+  // Max seconds the in-process CLI driver will inline-wait to self-heal a rate-limit pause.
+  RATE_LIMIT_INLINE_WAIT_MAX_SECONDS: z.coerce.number().int().min(0).max(900).default(120),
+  // SerpAPI (M3 local-business discovery, ADR-024).
+  SERPAPI_API_KEY: z.string().optional(),
+  SERPAPI_BASE_URL: z.string().url().default("https://serpapi.com"),
+  SERPAPI_MAX_RPM: z.coerce.number().int().min(1).max(240).default(10),
+  SERPAPI_MAX_PAGES_PER_QUERY: z.coerce.number().int().min(1).max(10).default(6),
+  SERPAPI_DEFAULT_RETRY_AFTER_SECONDS: z.coerce.number().int().min(1).max(3600).default(60),
+  // Firecrawl (M3 website research; ADR-023/027). Off unless explicitly selected.
+  FIRECRAWL_API_KEY: z.string().optional(),
+  FIRECRAWL_BASE_URL: z.string().url().default("https://api.firecrawl.dev"),
+  WEBSITE_RESEARCH_PROVIDER: z.enum(["fake", "firecrawl"]).default("fake"),
+  // Provider keys are optional (never used until their milestone; fake providers otherwise).
   APOLLO_API_KEY: z.string().optional(),
   GOOGLE_PLACES_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),

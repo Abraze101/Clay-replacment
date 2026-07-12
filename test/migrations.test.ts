@@ -10,11 +10,11 @@ test("migrations: apply once, re-run is a no-op, checksums recorded", async () =
   const db = await connectDb("pglite://memory");
   try {
     const first = await migrate(db);
-    assert.deepEqual(first.applied, ["0001_init", "0002_m1"]);
+    assert.deepEqual(first.applied, ["0001_init", "0002_m1", "0003_m3"]);
 
     const second = await migrate(db);
     assert.deepEqual(second.applied, []);
-    assert.deepEqual(second.alreadyApplied, ["0001_init", "0002_m1"]);
+    assert.deepEqual(second.alreadyApplied, ["0001_init", "0002_m1", "0003_m3"]);
 
     const status = await migrationStatus(db);
     assert.equal(status.length, MIGRATIONS.length);
@@ -91,6 +91,24 @@ test("migrations: 0002 adds users, approval_tokens, and created_by attribution (
     );
     await db.rawExec("SELECT created_by FROM workflows LIMIT 0;");
     await db.rawExec("SELECT created_by FROM workflow_versions LIMIT 0;");
+  } finally {
+    await db.close();
+  }
+});
+
+test("migrations: 0003 adds M3 scheduling columns and the run_source_requests ledger (additive)", async () => {
+  const db = await connectDb("pglite://memory");
+  try {
+    await migrate(db);
+    // New columns on existing tables.
+    await db.rawExec("SELECT place_id, timezone FROM leads LIMIT 0;");
+    await db.rawExec("SELECT snapshot_expires_at FROM lead_sources LIMIT 0;");
+    await db.rawExec("SELECT resume_at FROM runs LIMIT 0;");
+    await db.rawExec("SELECT next_attempt_at FROM run_item_steps LIMIT 0;");
+    // New durable source-request ledger table.
+    await db.rawExec(
+      "SELECT id, run_id, step_id, request_index, descriptor, status, attempts, request_key, provider_request_id, cost_units, records_inserted, coverage_note, last_error FROM run_source_requests LIMIT 0;",
+    );
   } finally {
     await db.close();
   }

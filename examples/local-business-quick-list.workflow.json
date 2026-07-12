@@ -1,0 +1,19 @@
+{
+  "id": "local-business-quick-list",
+  "version": 1,
+  "name": "Local business quick list",
+  "description": "Milestone 3 Quick List: discover local businesses via SerpAPI's Google Maps engine, normalize, dedupe, and export a CSV — no paid person/contact enrichment.",
+  "inputs": {
+    "businessType": "roofing contractor",
+    "locations": ["Austin, TX"],
+    "limit": 50,
+    "enrichmentProfile": "quick_list"
+  },
+  "steps": [
+    { "id": "discover", "type": "source", "provider": "local-business" },
+    { "id": "normalize", "type": "normalize" },
+    { "id": "dedupe", "type": "dedupe" },
+    { "id": "review", "type": "review_gate" },
+    { "id": "export", "type": "export", "format": "csv" }
+  ]
+}

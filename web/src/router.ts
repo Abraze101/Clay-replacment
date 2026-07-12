@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 export type Route =
   | { name: "home" }
   | { name: "new" }
+  | { name: "providers" }
   | { name: "run"; runId: string }
   | { name: "results"; runId: string };
 
@@ -13,6 +14,7 @@ export function parseRoute(hash: string): Route {
   const seg = path.split("/").filter((s) => s.length > 0);
   if (seg.length === 0) return { name: "home" };
   if (seg[0] === "new") return { name: "new" };
+  if (seg[0] === "providers") return { name: "providers" };
   if (seg[0] === "runs" && seg[1] !== undefined) {
     if (seg[2] === "results") return { name: "results", runId: seg[1] };
     return { name: "run", runId: seg[1] };

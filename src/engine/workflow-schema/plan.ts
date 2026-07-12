@@ -2,6 +2,7 @@ import { checksumOf } from "../../shared/checksum.js";
 import { AppError } from "../../shared/errors.js";
 import type { EstimatedPaidAction } from "../../storage/database-types.js";
 import type { ProviderRegistry } from "../../providers/types.js";
+import { isPagedPaidSource } from "../../providers/types.js";
 import type { CapabilityOverrides } from "./overrides.js";
 import { M5_ONLY_OVERRIDES } from "./overrides.js";
 import type { Profile, WorkflowStep } from "./steps.js";
@@ -63,9 +64,13 @@ export function resolvePlan(args: {
   inputs.enrichmentProfile = profile;
   const warnings: string[] = [];
 
+  // Per-source planned request counts (paged paid sources only), used to price
+  // the source step by search volume rather than by the per-record cap.
+  const sourceRequestCounts = new Map<string, number>();
+
   const steps: PlannedStep[] = args.definition.steps.map((step) => {
     const provider = "provider" in step ? step.provider : undefined;
-    const paid = step.type === "enrich";
+    let paid = step.type === "enrich";
     let costPerRecord = 0;
     if (step.type === "enrich") {
       const enricher = args.providers.enrichers.get(step.provider);
@@ -74,11 +79,34 @@ export function resolvePlan(args: {
       }
       costPerRecord = enricher.costPerRecord;
     }
-    if (step.type === "source" && !args.providers.sources.has(step.provider)) {
-      throw new AppError("VALIDATION_FAILED", `Source step '${step.id}' references unregistered provider '${step.provider}'.`, { stepId: step.id, provider: step.provider });
+    if (step.type === "source") {
+      const src = args.providers.sources.get(step.provider);
+      if (!src) {
+        throw new AppError("VALIDATION_FAILED", `Source step '${step.id}' references unregistered provider '${step.provider}'.`, { stepId: step.id, provider: step.provider });
+      }
+      // A paged paid source (e.g. SerpAPI Maps) is billed per search request;
+      // the preview cost derives from the planned request volume.
+      if (isPagedPaidSource(src)) {
+        const est = src.estimateSearchCost({
+          businessType: inputs.businessType,
+          locations: inputs.locations,
+          limit: inputs.limit,
+        });
+        paid = true;
+        costPerRecord = est.creditsPerRequest;
+        sourceRequestCounts.set(step.id, est.requests);
+      }
     }
-    if (step.type === "research" && !args.providers.researchers.has(step.provider)) {
-      throw new AppError("VALIDATION_FAILED", `Research step '${step.id}' references unregistered provider '${step.provider}'.`, { stepId: step.id, provider: step.provider });
+    if (step.type === "research") {
+      const rp = args.providers.researchers.get(step.provider);
+      if (!rp) {
+        throw new AppError("VALIDATION_FAILED", `Research step '${step.id}' references unregistered provider '${step.provider}'.`, { stepId: step.id, provider: step.provider });
+      }
+      // A live research provider (Firecrawl) makes research a paid item step.
+      if (rp.costPerRecord && rp.costPerRecord > 0) {
+        paid = true;
+        costPerRecord = rp.costPerRecord;
+      }
     }
 
     let willRun = true;
@@ -105,23 +133,39 @@ export function resolvePlan(args: {
     }
   }
 
-  const paidSteps = steps.filter((s) => s.paid && s.willRun);
+  // The per-record cap governs item-level paid work (enrichment) only. A paid
+  // source books per-search cost against its own ledger and never consumes the
+  // record cap, so it is excluded from this computation.
+  const itemPaidSteps = steps.filter((s) => s.paid && s.willRun && s.type !== "source");
+  const paidSourceSteps = steps.filter((s) => s.paid && s.willRun && s.type === "source");
+  const anyPaidStep = itemPaidSteps.length > 0 || paidSourceSteps.length > 0;
   const paidRecordCap =
-    paidSteps.length === 0 ? 0 : Math.min(inputs.limit, MAX_PAID_RECORDS, args.requestedCap ?? MAX_PAID_RECORDS);
-  const estimatedPaidActions: EstimatedPaidAction[] = paidSteps.map((s) => ({
-    stepId: s.id,
-    provider: s.provider ?? "unknown",
-    count: paidRecordCap,
-    costPerRecord: s.costPerRecord,
-  }));
+    itemPaidSteps.length === 0 ? 0 : Math.min(inputs.limit, MAX_PAID_RECORDS, args.requestedCap ?? MAX_PAID_RECORDS);
+  const estimatedPaidActions: EstimatedPaidAction[] = steps
+    .filter((s) => s.paid && s.willRun)
+    .map((s) => ({
+      stepId: s.id,
+      provider: s.provider ?? "unknown",
+      // Source steps are counted by planned search requests; item steps by cap.
+      count: s.type === "source" ? (sourceRequestCounts.get(s.id) ?? 0) : paidRecordCap,
+      costPerRecord: s.costPerRecord,
+    }));
   const estimatedCost = round4(estimatedPaidActions.reduce((acc, a) => acc + a.count * a.costPerRecord, 0));
   const creditLimit = args.requestedBudget ?? estimatedCost;
   if (creditLimit < 0) throw new AppError("VALIDATION_FAILED", "Budget must be >= 0.", {});
-  if (paidSteps.length > 0 && creditLimit < estimatedCost) {
+  if (anyPaidStep && creditLimit < estimatedCost) {
     warnings.push(`Budget (${creditLimit}) is below the estimated cost (${estimatedCost}); the run will pause at the credit cap and keep partial results.`);
   }
-  if (profile === "quick_list" && paidSteps.length > 0) {
-    warnings.push("quick_list normally enables no paid steps; check the workflow's profile tags.");
+  // The quick_list "no paid steps" caution is about person/contact enrichment,
+  // not the source itself — a Quick List legitimately pays for discovery.
+  if (profile === "quick_list" && itemPaidSteps.length > 0) {
+    warnings.push("quick_list normally enables no paid contact/enrichment steps; check the workflow's profile tags.");
+  }
+  for (const s of paidSourceSteps) {
+    const count = sourceRequestCounts.get(s.id) ?? 0;
+    warnings.push(
+      `Source '${s.id}' (${s.provider ?? "unknown"}) will issue ${count} paid search request(s) at ${s.costPerRecord} credit(s) each.`,
+    );
   }
 
   const planHash = checksumOf({

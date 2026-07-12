@@ -30,6 +30,8 @@ export async function createTestApp(): Promise<TestApp> {
     FAKE_ENRICH_LEDGER_PATH: ledgerPath,
     LEASE_TTL_SECONDS: 5,
     MAX_STEP_ATTEMPTS: 3,
+    // Deterministic pauses in tests: never inline-heal a rate-limit pause.
+    RATE_LIMIT_INLINE_WAIT_MAX_SECONDS: 0,
   });
   await migrate(app.db);
   return {

@@ -2,7 +2,7 @@
 
 This workspace contains the product and engineering plan for a workflow-driven lead-generation engine inspired by Angus Sewell's "build it yourself" Clay example.
 
-Status: Milestone 0 (engine skeleton) is implemented and validated (2026-07-11) — headless engine, fake providers, persistent runs, plan-hash approvals, CLI, CSV export, 21 offline test files, and the passing pg-boss/PGlite spike. Documentation follows the [consolidated revision directive](docs/proposals/consolidated-revision-directive.md) (2026-07-10). Next: Milestone 1, the harness adapter (MCP over stdio + Streamable HTTP).
+Status: Milestones 0–3 are implemented and validated — headless engine with fake providers (M0), the model-neutral MCP harness adapter (M1), the minimal web UI (M2), and the live local-business workflow (M3, 2026-07-12): SerpAPI Google Maps discovery, Quick List export, durable rate-limit pause/auto-resume scheduling, pg-boss activation, and optional Firecrawl website research. Documentation follows the [consolidated revision directive](docs/proposals/consolidated-revision-directive.md) (2026-07-10). Next: Milestone 4, the professional (Apollo) and imported-list workflows.
 
 ## What we are building
 
@@ -16,7 +16,7 @@ The MVP will let the user, a marketing agency owner, or a small agency team:
 6. Review results through Claude, Codex, an OpenAI agent, the CLI, or the minimal web UI expected at Milestone 2.
 7. Export approved records to CSV and, later, HubSpot.
 
-The MVP will not scrape LinkedIn or Google Maps, automate LinkedIn actions, send email, enroll prospects in sequences, or target consumers using sensitive health data.
+The MVP will not scrape LinkedIn, automate LinkedIn actions, send email, enroll prospects in sequences, or target consumers using sensitive health data. Local-business discovery reads Google Maps results through SerpAPI's API, an owner-accepted interim decision with recorded ToS risk (ADR-023/ADR-024 in [docs/decisions.md](docs/decisions.md)).
 
 ## Delivery models
 
@@ -50,3 +50,12 @@ pnpm web        # serve UI + JSON API on http://localhost:3000 (applies migratio
 ```
 
 Development mode runs two terminals: `pnpm web` (API on `WEB_PORT`, default 3000) and `pnpm ui:dev` (Vite dev server proxying `/api`). Everything runs on the fake providers with embedded PGlite — no credentials, no credit spend. PGlite is single-connection: do not run `pnpm web` and `pnpm mcp:http` against the same `pglite://` directory at once; use a PostgreSQL `DATABASE_URL` to run both. Stack decision: ADR-017 in [docs/decisions.md](docs/decisions.md).
+
+## Live providers (Milestone 3)
+
+Without keys, everything above still works on the fake providers. To source real local businesses, set (in the server environment or a local `.env` — never in the browser):
+
+- `SERPAPI_API_KEY` — connects the `local-business` source (SerpAPI Google Maps; free tier 250 searches/month; one search per location per run, shown in the preview before approval). Optional knobs: `SERPAPI_MAX_RPM` (default 10), `SERPAPI_MAX_PAGES_PER_QUERY` (default 6, used only for `@lat,lon,zoom` locations), `SERPAPI_DEFAULT_RETRY_AFTER_SECONDS` (default 60).
+- `FIRECRAWL_API_KEY` + `WEBSITE_RESEARCH_PROVIDER=firecrawl` — optionally connects `website-research` (1 credit per researched site; call-ready/full profiles only).
+
+Seed the M3 template from the UI (Provider setup shows connection status and free connection tests) or run the example: `examples/local-business-quick-list.workflow.json`. Provider rate limits pause the run with a resume time; short pauses self-heal in one-shot CLI runs, and `pnpm worker` (or `pnpm web`) hosts a resident pg-boss worker for delayed resumes (`JOB_DRIVER=pgboss|inprocess` overrides the per-entry default). `pnpm probe:serpapi -- --locations "Austin, TX" --yes` runs the gated dev probe that validates live field mapping and writes sanitized fixture drafts; it refuses to run without the key and the explicit `--yes`, and never runs in CI.

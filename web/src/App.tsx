@@ -4,6 +4,7 @@ import { useHashRoute } from "./router.js";
 import { HomeScreen } from "./screens/HomeScreen.js";
 import { NewRunWizard } from "./screens/NewRunWizard.js";
 import { ProgressScreen } from "./screens/ProgressScreen.js";
+import { ProviderSetupScreen } from "./screens/ProviderSetupScreen.js";
 import { ResultsScreen } from "./screens/ResultsScreen.js";
 
 export function App(): ReactElement {
@@ -11,6 +12,8 @@ export function App(): ReactElement {
   switch (route.name) {
     case "new":
       return <NewRunWizard />;
+    case "providers":
+      return <ProviderSetupScreen />;
     case "run":
       return <ProgressScreen key={route.runId} runId={route.runId} />;
     case "results":

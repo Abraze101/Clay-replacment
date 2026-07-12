@@ -14,6 +14,7 @@ export type {
   PreviewResult,
   Profile,
   ProviderStatusInfo,
+  ProviderTestResult,
   ResolvedPlan,
   ResultsPage,
   RetryRunResponse,

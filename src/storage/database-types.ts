@@ -106,6 +106,10 @@ export interface LeadsTable {
   normalized_phone: string | null;
   source_provider: string | null;
   source_provider_id: string | null;
+  /** Google place_id (0003_m3); cross-provider identity key. Numeric CID stays in lead_sources.snapshot. */
+  place_id: string | null;
+  /** IANA timezone id (0003_m3); NULL means unknown, never guessed. */
+  timezone: string | null;
   metadata: JsonColumn<JsonObject>;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
@@ -139,6 +143,8 @@ export interface RunsTable {
   credits_used: NumericColumnOpt;
   approvals: JsonColumnOpt<ApprovalEntry[]>;
   step_progress: JsonColumnOpt<Record<string, string>>;
+  /** Earliest time a rate-limited pause may auto-resume (0003_m3); NULL otherwise. */
+  resume_at: TimestampColumn | null;
   review_gate_passed_at: TimestampColumn | null;
   review_gate_actor: string | null;
   lease_token: string | null;
@@ -224,8 +230,36 @@ export interface RunItemStepsTable {
   attempt_costs: JsonColumnOpt<AttemptCostEntry[]>;
   result: JsonColumnOpt<JsonObject>;
   last_error: JsonColumn<JsonObject> | null;
+  /** Scheduled retry time after a rate-limit deferral (0003_m3); NULL otherwise. */
+  next_attempt_at: TimestampColumn | null;
   started_at: TimestampColumn | null;
   completed_at: TimestampColumn | null;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+export type SourceRequestStatus = "pending" | "running" | "completed" | "failed" | "needs_review";
+
+/**
+ * Durable per-request ledger for a PAID, MULTI-REQUEST source step (0003_m3).
+ * One row per planned search; the runner claims/finalizes it exactly like a
+ * run_item_steps row so a crash/429/credit pause never re-pays a completed
+ * search. UNIQUE (run_id, step_id, request_index) makes ensure idempotent.
+ */
+export interface RunSourceRequestsTable {
+  id: Generated<string>;
+  run_id: string;
+  step_id: string;
+  request_index: number;
+  descriptor: string;
+  status: WithDefault<SourceRequestStatus>;
+  attempts: WithDefault<number>;
+  request_key: string;
+  provider_request_id: string | null;
+  cost_units: NumericColumnOpt;
+  records_inserted: number | null;
+  coverage_note: string | null;
+  last_error: JsonColumn<JsonObject> | null;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
 }
@@ -240,6 +274,8 @@ export interface LeadSourcesTable {
   request_id: string | null;
   retrieved_at: GeneratedTimestamp;
   snapshot: JsonColumn<JsonObject>;
+  /** Policy-driven snapshot expiry (0003_m3); NULL = no expiry. No purge job at M3. */
+  snapshot_expires_at: TimestampColumn | null;
   created_at: GeneratedTimestamp;
 }
 
@@ -352,6 +388,7 @@ export interface Database {
   runs: RunsTable;
   run_items: RunItemsTable;
   run_item_steps: RunItemStepsTable;
+  run_source_requests: RunSourceRequestsTable;
   lead_sources: LeadSourcesTable;
   contact_points: ContactPointsTable;
   contact_point_checks: ContactPointChecksTable;

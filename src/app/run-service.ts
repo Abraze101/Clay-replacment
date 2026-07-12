@@ -27,6 +27,7 @@ import {
   type RunRow,
 } from "../storage/repositories/run-repo.js";
 import { getLatestVersion, getVersion, getWorkflow } from "../storage/repositories/workflow-repo.js";
+import { listSourceRequests, requeueFailedSourceRequests } from "../storage/repositories/source-request-repo.js";
 import { consumeApprovalToken, issueApprovalToken, linkApprovalToRun } from "./approval-service.js";
 import type { AppContainer } from "./container.js";
 
@@ -157,6 +158,7 @@ export interface RunStatusSummary {
   runId: string;
   status: string;
   pauseReason: string | null;
+  resumeAt: string | null;
   cancelRequested: boolean;
   profile: string;
   planHash: string;
@@ -179,6 +181,13 @@ export interface RunStatusSummary {
     stepsNeedingReview: number;
   };
   stepProgress: Record<string, string>;
+  /** Per-search source provenance/coverage — makes "coverage limits are visible" true. */
+  sourceCoverage: {
+    descriptor: string;
+    status: string;
+    recordsInserted: number | null;
+    coverageNote: string | null;
+  }[];
   startedAt: string | null;
   completedAt: string | null;
   lastError: unknown;
@@ -188,10 +197,12 @@ export async function runStatus(app: AppContainer, runId: string): Promise<RunSt
   const run = await getRun(app.db.kysely, runId);
   const items = await listRunItems(app.db.kysely, runId);
   const steps = await listStepsForRun(app.db.kysely, runId);
+  const sourceRequests = await listSourceRequests(app.db.kysely, runId);
   return {
     runId: run.id,
     status: run.status,
     pauseReason: run.pause_reason,
+    resumeAt: iso(run.resume_at),
     cancelRequested: run.cancel_requested,
     profile: run.enrichment_profile,
     planHash: run.plan_hash,
@@ -214,6 +225,12 @@ export async function runStatus(app: AppContainer, runId: string): Promise<RunSt
       stepsNeedingReview: steps.filter((s) => s.status === "needs_review").length,
     },
     stepProgress: run.step_progress,
+    sourceCoverage: sourceRequests.map((r) => ({
+      descriptor: r.descriptor,
+      status: r.status,
+      recordsInserted: r.records_inserted,
+      coverageNote: r.coverage_note,
+    })),
     startedAt: iso(run.started_at),
     completedAt: iso(run.completed_at),
     lastError: run.last_error,
@@ -414,11 +431,27 @@ export async function prepareResume(
     await setRunStatus(app.db.kysely, runId, "running");
   } else if (fresh.status === "paused") {
     assertRunTransition("paused", "running");
-    await setRunStatus(app.db.kysely, runId, "running", { pauseReason: null });
+    await setRunStatus(app.db.kysely, runId, "running", { pauseReason: null, resumeAt: null });
   } else if (fresh.status === "completed" || fresh.status === "failed" || fresh.status === "cancelled") {
     throw new AppError("RUN_NOT_RUNNABLE", `Run is ${fresh.status}; use 'run retry' for failed items.`, { runId });
   }
   return await getRun(app.db.kysely, runId);
+}
+
+/**
+ * Auto-resume a run paused ONLY by a provider rate limit whose resume_at has
+ * arrived. Never lifts a credit-cap or operator pause — those require explicit
+ * operator action / a fresh approval. Budget/cap are unchanged, so no approval
+ * token is needed. Used by the job drivers' schedulers (in-process self-heal
+ * and the pg-boss delayed job).
+ */
+export async function autoResumeRun(app: AppContainer, runId: string): Promise<RunRow> {
+  const run = await getRun(app.db.kysely, runId);
+  if (run.status !== "paused" || run.pause_reason !== "rate_limited") return run;
+  if (run.resume_at !== null && new Date(run.resume_at) > new Date()) return run; // not due yet
+  assertRunTransition("paused", "running");
+  await setRunStatus(app.db.kysely, runId, "running", { pauseReason: null, resumeAt: null });
+  return await app.worker.runToBoundary(runId);
 }
 
 /** `run retry`: requeue failed steps/items (rotating request keys) and continue. needs_review is untouched. */
@@ -437,25 +470,33 @@ export async function prepareRetry(app: AppContainer, runId: string): Promise<{ 
   if (run.status === "cancelled") {
     throw new AppError("RUN_NOT_RUNNABLE", "Cancelled runs are not retried.", { runId });
   }
-  const requeued = await requeueFailedSteps(app.db.kysely, runId);
+  const requeuedSteps = await requeueFailedSteps(app.db.kysely, runId);
+  // Failed source searches are equally retryable (they cost nothing when they
+  // failed; completed/needs_review rows are untouched, so no double-spend).
+  const sourceRequeue = await requeueFailedSourceRequests(app.db.kysely, runId);
+  const requeued = requeuedSteps + sourceRequeue.requeued;
   if (requeued === 0) return { run, requeued: 0 };
   // Clear completed markers for re-entry (item steps recompute from the ledger).
   assertRunTransition(run.status, "running");
-  await setRunStatus(app.db.kysely, runId, "running", { completedAt: undefined });
-  await clearStepProgressForRetry(app, runId);
+  await setRunStatus(app.db.kysely, runId, "running", { completedAt: undefined, lastError: null });
+  await clearStepProgressForRetry(app, runId, sourceRequeue.stepIds);
   return { run: await getRun(app.db.kysely, runId), requeued };
 }
 
-async function clearStepProgressForRetry(app: AppContainer, runId: string): Promise<void> {
+async function clearStepProgressForRetry(app: AppContainer, runId: string, reopenedSourceStepIds: string[]): Promise<void> {
   // Item-step markers must re-open so requeued ledger rows are revisited;
-  // source/review_gate/export markers stay (source is done; the gate stays
-  // passed; export re-runs only via `export csv`).
+  // review_gate/export markers stay (the gate stays passed; export re-runs only
+  // via `export csv`). A source marker stays UNLESS one of its ledger rows was
+  // requeued — then the source step must re-enter (completed requests are
+  // skipped by the run_source_requests ledger, so nothing re-pays).
   const run = await getRun(app.db.kysely, runId);
   const plan = run.resolved_plan as unknown as { steps?: { id: string; type: string }[] };
   const keep: Record<string, string> = {};
   for (const [stepId, marker] of Object.entries(run.step_progress)) {
     const planStep = plan.steps?.find((s) => s.id === stepId);
-    if (planStep && (planStep.type === "source" || planStep.type === "review_gate")) keep[stepId] = marker;
+    if (!planStep) continue;
+    if (planStep.type === "review_gate") keep[stepId] = marker;
+    if (planStep.type === "source" && !reopenedSourceStepIds.includes(stepId)) keep[stepId] = marker;
   }
   const { kysely } = app.db;
   await kysely

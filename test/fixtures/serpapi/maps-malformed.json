@@ -1,0 +1,4 @@
+{
+  "search_metadata": { "id": "sanitized-malformed", "status": "Success" },
+  "local_results": "this-should-be-an-array-but-is-not"
+}

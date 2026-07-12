@@ -20,6 +20,7 @@ import type {
 } from "../database-types.js";
 import { num, round4 } from "../database-types.js";
 import { assertBoundedJson, toJson } from "./repo-util.js";
+import { sumSourceRequestCosts } from "./source-request-repo.js";
 
 export type RunRow = Selectable<RunsTable>;
 export type RunItemRow = Selectable<RunItemsTable>;
@@ -175,6 +176,7 @@ export async function setRunStatus(
   status: RunStatus,
   extra: {
     pauseReason?: PauseReason | null;
+    resumeAt?: Date | null;
     startedAt?: Date;
     completedAt?: Date;
     lastError?: Record<string, unknown> | null;
@@ -186,6 +188,7 @@ export async function setRunStatus(
       status,
       updated_at: new Date(),
       ...(extra.pauseReason !== undefined ? { pause_reason: extra.pauseReason } : {}),
+      ...(extra.resumeAt !== undefined ? { resume_at: extra.resumeAt } : {}),
       ...(extra.startedAt ? { started_at: extra.startedAt } : {}),
       ...(extra.completedAt ? { completed_at: extra.completedAt } : {}),
       ...(extra.lastError !== undefined ? { last_error: extra.lastError === null ? null : toJson(extra.lastError) } : {}),
@@ -266,41 +269,41 @@ export async function bumpRunCredits(db: Kysely<Database>, runId: string, cost: 
 // ---------------------------------------------------------------------------
 
 /**
- * Insert sourced records. `position` comes from a per-run monotonic counter
- * inside this transaction (never provider ordinal); UNIQUE (run_id, source_key)
- * makes a replayed source step upsert instead of duplicate.
+ * Insert sourced records within the CALLER's transaction. `position` comes from
+ * a per-run monotonic counter (never provider ordinal); UNIQUE (run_id,
+ * source_key) makes a replayed source step upsert instead of duplicate. The
+ * caller wraps this in a transaction (the paid source path commits the inserts,
+ * the run_source_requests finalize, and the credit bump together).
  */
 export async function insertRunItems(
-  db: Kysely<Database>,
+  trx: Kysely<Database>,
   runId: string,
   records: { sourceKey: string; snapshot: Record<string, unknown> }[],
 ): Promise<{ inserted: number }> {
   let inserted = 0;
-  await db.transaction().execute(async (trx) => {
-    const maxRow = await trx
-      .selectFrom("run_items")
-      .where("run_id", "=", runId)
-      .select(({ fn }) => fn.max("position").as("max_position"))
+  const maxRow = await trx
+    .selectFrom("run_items")
+    .where("run_id", "=", runId)
+    .select(({ fn }) => fn.max("position").as("max_position"))
+    .executeTakeFirst();
+  let position = maxRow?.max_position ?? 0;
+  for (const record of records) {
+    const row = await trx
+      .insertInto("run_items")
+      .values({
+        run_id: runId,
+        source_key: record.sourceKey,
+        position: position + 1,
+        snapshot: assertBoundedJson(record.snapshot, "run_items.snapshot"),
+      })
+      .onConflict((oc) => oc.columns(["run_id", "source_key"]).doNothing())
+      .returning("id")
       .executeTakeFirst();
-    let position = maxRow?.max_position ?? 0;
-    for (const record of records) {
-      const row = await trx
-        .insertInto("run_items")
-        .values({
-          run_id: runId,
-          source_key: record.sourceKey,
-          position: position + 1,
-          snapshot: assertBoundedJson(record.snapshot, "run_items.snapshot"),
-        })
-        .onConflict((oc) => oc.columns(["run_id", "source_key"]).doNothing())
-        .returning("id")
-        .executeTakeFirst();
-      if (row) {
-        position += 1;
-        inserted += 1;
-      }
+    if (row) {
+      position += 1;
+      inserted += 1;
     }
-  });
+  }
   return { inserted };
 }
 
@@ -480,6 +483,8 @@ export async function claimStep(
       status: "running",
       attempts: attempt,
       request_key: requestKey,
+      // Claiming clears any rate-limit schedule: we are executing it now.
+      next_attempt_at: null,
       started_at: step.started_at ?? new Date(),
       updated_at: new Date(),
     })
@@ -540,6 +545,28 @@ export async function finalizeStepAttempt(
         ? { last_error: outcome.lastError === null ? null : toJson(outcome.lastError) }
         : {}),
       ...(outcome.status === "completed" ? { completed_at: new Date() } : {}),
+      updated_at: new Date(),
+    })
+    .where("id", "=", stepRowId)
+    .execute();
+}
+
+/**
+ * Return a rate-limited step to `pending` WITHOUT counting the attempt (a 429 is
+ * a provider refusal, not a spent attempt) and schedule its next attempt. Books
+ * no cost and writes no attempt_costs entry.
+ */
+export async function deferStepForRateLimit(
+  db: Kysely<Database>,
+  stepRowId: string,
+  opts: { attempt: number; dueAt: Date },
+): Promise<void> {
+  await db
+    .updateTable("run_item_steps")
+    .set({
+      status: "pending",
+      attempts: Math.max(0, opts.attempt - 1),
+      next_attempt_at: opts.dueAt,
       updated_at: new Date(),
     })
     .where("id", "=", stepRowId)
@@ -672,8 +699,18 @@ export async function listStepsForRun(db: Kysely<Database>, runId: string): Prom
     .execute();
 }
 
-/** Reconcilable invariant (tested): runs.credits_used === SUM(run_item_steps.cost_units). */
+/** SUM(run_item_steps.cost_units) for a run — the item-step half of the credits invariant. */
 export async function sumStepCosts(db: Kysely<Database>, runId: string): Promise<number> {
   const rows = await listStepsForRun(db, runId);
   return round4(rows.reduce((acc, r) => acc + num(r.cost_units), 0));
+}
+
+/**
+ * Reconcilable invariant (tested): runs.credits_used ===
+ * SUM(run_item_steps.cost_units) + SUM(run_source_requests.cost_units). Since
+ * M3, a paid source step books cost on run_source_requests, so the invariant
+ * spans both ledgers.
+ */
+export async function sumRunCosts(db: Kysely<Database>, runId: string): Promise<number> {
+  return round4((await sumStepCosts(db, runId)) + (await sumSourceRequestCosts(db, runId)));
 }

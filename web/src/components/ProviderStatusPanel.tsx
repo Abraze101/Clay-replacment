@@ -21,6 +21,7 @@ export function ProviderStatusPanel({ providers }: { providers: ProviderStatusIn
           <span className="muted">
             {KIND_LABELS[p.kind]}
             {p.name.startsWith("fake-") ? " — fake data, no real spend" : ""}
+            {!p.connected && p.requiresEnv ? ` — set ${p.requiresEnv} (see Provider setup)` : ""}
           </span>
         </div>
       ))}

@@ -76,26 +76,29 @@ Acceptance:
 
 ## Milestone 3: local-business workflow
 
+Amended at M3 planning (2026-07-12, ADR-024): discovery moved from Firecrawl-scraped Maps pages to SerpAPI's Google Maps API after research showed Firecrawl cannot reliably scrape Maps; Firecrawl was retained for the optional website-research step (ADR-027), replacing the previously planned lean self-built fetcher.
+
 Deliver:
 
-- Firecrawl-based local-business discovery adapter (Google Maps listings, search results, business websites) per ADR-023, behind the provider-neutral source interface; details finalized at M3 planning.
-- Category/geography and service-area search inputs.
-- Source provenance handling: per-record source URL, retrieved-at, and a stable per-listing identifier (Places-specific storage/attribution and snapshot-expiry rules apply only if an official-API adapter is added).
-- Website-domain normalization and bounded website research through a lean policy-controlled fetcher.
-- Local-business dedupe.
-- Quick List workflow exporting available business details and public main phones without person-level enrichment.
-- Cost previews computed from Firecrawl's actual per-request/credit pricing for the planned scrape volume.
-- Shared retry/pause policy and 429 scheduling (first live rate-limited provider; see sequencing note).
-- Migration `0003` (source listing IDs, timezone, resume/next-attempt scheduling; exact columns at M3 planning).
+- SerpAPI Google Maps discovery adapter per ADR-024, behind the provider-neutral `local-business` source name and the `PagedPaidSource` interface (one billed search per location/page, durable `run_source_requests` ledger).
+- Category/geography search inputs (named locations = page 1 per location; `@lat,lon,zoom` locations paginate; deep geocoded pagination is a recorded follow-up).
+- Source provenance handling: per-record source URL, retrieved-at, and a stable per-listing identifier (`place_id`/CID; Places-specific storage/attribution and snapshot-expiry rules apply only if an official-API adapter is added).
+- Website-domain normalization and bounded website research through a flag-gated Firecrawl ResearchProvider (ADR-027; deferrable by env).
+- Local-business dedupe (plus `leads.place_id` and single-zone-state `leads.timezone`).
+- Quick List workflow exporting available business details, rating/review metadata, provenance URL, and public main phones without person-level enrichment.
+- Cost previews computed from the planned search-request volume (SerpAPI bills per successful search; the plan resolver prices the source step by request count).
+- Shared retry/pause policy and 429 scheduling (first live rate-limited provider; see sequencing note): `RateLimitError` → pause `rate_limited` + `runs.resume_at`/`run_item_steps.next_attempt_at` → delayed auto-resume without a fresh approval.
+- pg-boss activation behind `JobQueue` (ADR-002): `PgBossRunWorker`, delayed `startAfter` resumes, startup sweep, `leads worker` CLI command.
+- Migration `0003` (leads.place_id/timezone, lead_sources.snapshot_expires_at, runs.resume_at, run_item_steps.next_attempt_at, run_source_requests ledger).
 
 Acceptance:
 
 - A roofer campaign returns useful business leads through the CLI, MCP, and UI even when no owner or person record exists.
 - Geographic/query coverage limits are visible; one provider is never presented as complete market coverage.
 - Every sourced lead carries provenance (source URL, retrieved-at, listing identifier).
-- Preview costs derive from Firecrawl's actual pricing for the planned request volume.
+- Preview costs derive from the provider's actual pricing for the planned request volume.
 - Rate-limit responses pause and reschedule instead of failing the run.
-- CI remains fixture-only (no live Firecrawl credentials or spend).
+- CI remains fixture-only (no live SerpAPI/Firecrawl credentials or spend).
 
 ## Milestone 4: professional and imported workflows
 

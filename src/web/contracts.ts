@@ -39,13 +39,7 @@ export interface ApiFailure {
 
 export type ApiEnvelope<T> = ApiSuccess<T> | ApiFailure;
 
-export interface ProviderStatusInfo {
-  name: string;
-  kind: "source" | "enrich" | "research" | "model";
-  connected: boolean;
-  paid: boolean;
-  costPerRecord?: number;
-}
+export type { ProviderStatusEntry as ProviderStatusInfo, ProviderTestResult } from "../app/provider-service.js";
 
 export interface WorkflowCreateResponse {
   workflowId: string;
@@ -121,7 +115,7 @@ export const reviewBodySchema = z
 
 export const createWorkflowBodySchema = z.union([
   z.object({ definition: z.record(z.string(), z.unknown()) }).strict(),
-  z.object({ template: z.enum(["local-service-demo"]) }).strict(),
+  z.object({ template: z.enum(["local-service-demo", "local-business-quick-list"]) }).strict(),
 ]);
 
 export const exportBodySchema = z.object({ force: z.boolean().optional() }).strict();

@@ -115,34 +115,41 @@ test("web api: run-state guards — review-while-running, invalid cursor, export
   }
 });
 
-test("web api: provider status exposes connection booleans and no secret material", async () => {
+test("web api: provider status exposes connection booleans and never the key value", async () => {
   const t = await createTestApp();
+  // A real-looking key value in the environment must never cross the wire —
+  // the payload may only name the env VAR that would connect a provider.
+  const SECRET = "sk-super-secret-serpapi-value-12345";
+  t.app.env.SERPAPI_API_KEY = SECRET;
   const web = await startTestWebServer(t);
   try {
     const res = await web.getJson<{ providers: ProviderStatusInfo[] }>("/api/providers");
     assert.equal(res.status, 200);
     const providers = res.body.data?.providers;
     assert.ok(providers);
+    // M3: the three fakes (registered) plus the live-provider catalog, which
+    // surfaces unconfigured providers as connected:false.
     assert.deepEqual(
       providers.map((p) => p.name).sort(),
-      ["fake-apollo", "fake-places", "fake-website"],
+      ["fake-apollo", "fake-places", "fake-website", "local-business", "website-research"],
     );
-    for (const provider of providers) {
-      assert.deepEqual(
-        Object.keys(provider).sort(),
-        provider.kind === "enrich"
-          ? ["connected", "costPerRecord", "kind", "name", "paid"]
-          : ["connected", "kind", "name", "paid"],
-        "provider rows carry only status fields — never key material",
-      );
+    for (const provider of providers.filter((p) => p.name.startsWith("fake-"))) {
       assert.equal(provider.connected, true);
     }
     const enricher = providers.find((p) => p.kind === "enrich");
     assert.equal(enricher?.paid, true);
     assert.equal(enricher?.costPerRecord, 1);
 
+    // The registry was built before the key was injected, so local-business
+    // reports missing here; the catalog names its env var without any value.
+    const localBusiness = providers.find((p) => p.name === "local-business");
+    assert.equal(localBusiness?.connected, false);
+    assert.equal(localBusiness?.requiresEnv, "SERPAPI_API_KEY");
+    assert.equal(localBusiness?.paid, true);
+
     const raw = JSON.stringify(res.body);
-    assert.ok(!/API_KEY|TOKEN|secret/i.test(raw), "no secret-shaped fields in the provider payload");
+    assert.ok(!raw.includes(SECRET), "the key VALUE never appears in the provider payload");
+    assert.ok(!/"apiKey"|"api_key"|"token"|"secret"/i.test(raw), "no secret-shaped FIELDS in the provider payload");
   } finally {
     await web.close();
     await t.teardown();

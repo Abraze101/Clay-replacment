@@ -38,7 +38,7 @@ Read these documents before planning or changing code:
 - Prefer deterministic rules for qualification. An LLM may explain or supplement a score, but it may not be the sole source of a qualification decision.
 - The embedded AI assistant (MiniMax or any configured model) may not bypass cost preview or approval, write directly to the database, mark contact information verified, be the sole qualification authority, or own run state.
 - AI-generated claims and outreach must be grounded only in persisted source fields; uncertain claims must be omitted or flagged.
-- Record vendor/library decisions as ADR entries in `docs/decisions.md` with revisit triggers. The LinkedIn-scraping prohibition is a permanent guardrail. The former Google Maps/SERP-scraping prohibition was lifted by owner decision on 2026-07-12 (ADR-023): Firecrawl-based scraping of Google Maps listings and search results is the interim local-business discovery path. The owner accepts the platform ToS risk; keep the source adapter provider-neutral so an official-API adapter can replace Firecrawl without engine changes, and revisit before any managed/beta launch.
+- Record vendor/library decisions as ADR entries in `docs/decisions.md` with revisit triggers. The LinkedIn-scraping prohibition is a permanent guardrail. The former Google Maps/SERP-scraping prohibition was lifted by owner decision on 2026-07-12 (ADR-023, amended by ADR-024): SerpAPI's Google Maps API is the interim local-business discovery path, and Firecrawl covers optional business-website research. The owner accepts the platform ToS risk (both vendors scrape Google/websites inside their own boundaries); keep the source adapter provider-neutral so a different Maps API or an official-API adapter can replace SerpAPI without engine changes, and revisit before any managed/beta launch.
 
 ## Engineering conventions
 
@@ -49,7 +49,7 @@ Read these documents before planning or changing code:
 - Keep MiniMax, OpenAI, and Anthropic generation behind one shared model-provider interface. A workflow must still run when its optional `generate` step is disabled.
 - Workflow steps must come from the approved allowlist: `source`, `normalize`, `dedupe`, `enrich`, `filter`, `research`, `score`, `generate`, `review_gate`, and `export`.
 - Keep orchestration in explicit workflow steps, not in request handlers or UI components.
-- Store sanitized provider fixtures for tests; CI must not use live Firecrawl, Apollo, MiniMax, OpenAI, Anthropic, LinkedIn, or HubSpot credentials.
+- Store sanitized provider fixtures for tests; CI must not use live SerpAPI, Firecrawl, Apollo, MiniMax, OpenAI, Anthropic, LinkedIn, or HubSpot credentials.
 - Unit-test identity resolution, scoring, state transitions, cost gates, and idempotency.
 - Add contract tests for provider adapters and an end-to-end test for the happy-path vertical slice.
 - Update these documents when an accepted implementation decision changes the architecture.

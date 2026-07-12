@@ -23,6 +23,8 @@
     "mcp:stdio": "tsx src/mcp/stdio.ts",
     "mcp:http": "tsx src/mcp/http.ts",
     "web": "tsx src/web/server.ts",
+    "worker": "tsx src/cli/index.ts worker",
+    "probe:serpapi": "tsx scripts/probe-serpapi-maps.ts",
     "ui:dev": "vite dev --config web/vite.config.ts",
     "ui:build": "vite build --config web/vite.config.ts"
   },
@@ -35,6 +37,7 @@
     "kysely": "0.29.3",
     "libphonenumber-js": "1.13.8",
     "pg": "^8.22.0",
+    "pg-boss": "12.25.1",
     "tldts": "7.4.8",
     "zod": "^4.4.3"
   },
@@ -48,7 +51,6 @@
     "@vitejs/plugin-react": "^6.0.3",
     "eslint": "^10.6.0",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "pg-boss": "12.25.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "tsx": "^4.23.0",

@@ -1,0 +1,53 @@
+{
+  "search_metadata": { "id": "sanitized-req-0", "status": "Success" },
+  "search_parameters": { "engine": "google_maps", "q": "roofing contractor Austin, TX", "type": "search" },
+  "search_information": { "query_displayed": "roofing contractor Austin, TX" },
+  "local_results": [
+    {
+      "position": 1,
+      "title": "Austin Roofing Co",
+      "place_id": "ChIJsanitizedAAA",
+      "data_id": "0x0:0xaaa",
+      "data_cid": "1111111111111111111",
+      "type": "Roofing contractor",
+      "types": ["Roofing contractor"],
+      "address": "100 Congress Ave, Austin, TX 78701, United States",
+      "phone": "+1 512-555-0100",
+      "website": "https://austinroofingco.example",
+      "rating": 4.8,
+      "reviews": 320,
+      "gps_coordinates": { "latitude": 30.2672, "longitude": -97.7431 }
+    },
+    {
+      "position": 2,
+      "title": "Hill Country Roofers",
+      "place_id": "ChIJsanitizedBBB",
+      "data_cid": "2222222222222222222",
+      "type": "Roofing contractor",
+      "address": "200 Barton Springs Rd, Austin, TX 78704, United States",
+      "phone": "+1 512-555-0142",
+      "website": "https://hillcountryroofers.example",
+      "rating": 4.5,
+      "reviews": 112
+    },
+    {
+      "position": 3,
+      "title": "Lone Star Roof Repair",
+      "data_cid": "3333333333333333333",
+      "type": "Roofing contractor",
+      "address": "300 E 6th St, Austin, TX 78701, United States",
+      "phone": "+1 512-555-0173",
+      "rating": 4.2,
+      "reviews": 58
+    },
+    {
+      "position": 4,
+      "title": "No Identifier Roofing",
+      "type": "Roofing contractor",
+      "address": "400 W 5th St, Austin, TX 78703, United States",
+      "rating": 4.0,
+      "reviews": 12
+    }
+  ],
+  "serpapi_pagination": { "next": "https://serpapi.com/search?engine=google_maps&start=20" }
+}

@@ -53,7 +53,7 @@ The user can say, for example, "Call-Ready, but business main numbers are fine a
 
 ## CLI equivalents
 
-The implemented command surface (M0/M1; `run preview` issues the single-use approval token that `run start` consumes):
+The implemented command surface (M0/M1, plus the M3 `worker`; `run preview` issues the single-use approval token that `run start` consumes):
 
 ```text
 leads workflow create --file workflow.json
@@ -67,7 +67,10 @@ leads run resume <run-id> [--budget <n> --cap <n> --approval <fresh-token>]
 leads run retry <run-id>
 leads run cancel <run-id>
 leads export csv <run-id>
+leads worker
 ```
+
+`leads worker` (M3) hosts a resident pg-boss worker for delayed rate-limit resumes. One-shot CLI runs self-heal short provider pauses inline; longer pauses (`runs.resume_at`) need a resident worker — `leads worker` or the web server. PGlite allows only one live process per `pglite://` directory; use a PostgreSQL `DATABASE_URL` to run the worker alongside another entry.
 
 ## Workflow 1: local business discovery
 

@@ -5,6 +5,7 @@ import { Command } from "commander";
 
 import type { AppContainer } from "../app/container.js";
 import { createContainer } from "../app/container.js";
+import { PgBossRunWorker } from "../jobs/pg-boss-worker.js";
 import {
   createWorkflowFromDefinition,
   listWorkflowSummaries,
@@ -128,6 +129,31 @@ db.command("status")
       };
     }),
   );
+
+// --------------------------------------------------------------------------- worker
+program
+  .command("worker")
+  .description("run a resident pg-boss worker that hosts delayed rate-limit resumes (use a PostgreSQL DATABASE_URL to run alongside the web/MCP servers; a pglite:// directory allows only one live process)")
+  .action(async () => {
+    const app = await createContainer({ jobDriver: "pgboss" });
+    try {
+      await migrate(app.db);
+      if (app.worker instanceof PgBossRunWorker) await app.worker.start();
+    } catch (err) {
+      await app.close().catch(() => undefined);
+      emitError(useJson(), err);
+      process.exitCode = 1;
+      return;
+    }
+    process.stdout.write("Lead-engine worker running (pg-boss). Press Ctrl+C to stop.\n");
+    // pg-boss's polling/supervise timers keep the event loop alive; the process
+    // stays up until a signal triggers a clean shutdown.
+    const shutdown = (): void => {
+      void app.close().catch(() => undefined).then(() => process.exit(0));
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+  });
 
 // --------------------------------------------------------------------------- workflow
 const workflow = program.command("workflow").description("workflow management");

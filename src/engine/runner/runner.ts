@@ -1,5 +1,5 @@
 import { canonicalJson } from "../../shared/checksum.js";
-import { AmbiguousOutcomeError, AppError, RetryableProviderError } from "../../shared/errors.js";
+import { AmbiguousOutcomeError, AppError, RateLimitError, RetryableProviderError } from "../../shared/errors.js";
 import type { Db } from "../../storage/db.js";
 import { num, round4 } from "../../storage/database-types.js";
 import type { RunItemRow, RunRow } from "../../storage/repositories/run-repo.js";
@@ -7,11 +7,11 @@ import {
   bumpRunCredits,
   claimRunLease,
   claimStep,
+  deferStepForRateLimit,
   ensureStepRow,
   finalizeStepAttempt,
   getRun,
   getRunItem,
-  insertRunItems,
   latestApproval,
   listRunItems,
   listSteps,
@@ -31,6 +31,7 @@ import type { WorkflowDefinition } from "../workflow-schema/workflow.js";
 import { parseWorkflowDefinition } from "../workflow-schema/workflow.js";
 import type { ExecOutcome } from "./executors.js";
 import { executeDedupe, executeEnrich, executeFilter, executeNormalize, executeResearch, executeScore } from "./executors.js";
+import { executeSourceStep } from "./source-step.js";
 import { assertItemTransition, assertRunTransition } from "./states.js";
 
 export interface RunnerHooks {
@@ -48,8 +49,8 @@ export interface RunnerDeps {
   hooks?: RunnerHooks;
 }
 
-type StepSignal = "completed" | "waiting_review" | "paused" | "cancelled";
-type ItemSignal = "ok" | "failed" | "needs_review" | "skipped_item";
+type StepSignal = "completed" | "waiting_review" | "paused" | "cancelled" | "failed";
+type ItemSignal = "ok" | "failed" | "needs_review" | "skipped_item" | "rate_limited";
 
 /**
  * Drive one run to its next durable boundary (waiting_review, paused,
@@ -136,27 +137,11 @@ async function runSteps(
 
     switch (defStep.type) {
       case "source": {
-        const provider = deps.providers.sources.get(defStep.provider);
-        if (!provider) throw new AppError("VALIDATION_FAILED", `Unregistered source provider '${defStep.provider}'.`, {});
-        const inputs = plan.inputs;
-        const { records, requestId } = await provider.search({
-          businessType: inputs.businessType,
-          locations: inputs.locations,
-          limit: plan.sourceLimit,
-        });
-        await insertRunItems(
-          kysely,
-          runId,
-          records.slice(0, plan.sourceLimit).map((r) => ({
-            sourceKey: r.sourceKey,
-            snapshot: {
-              source: r,
-              sourceRequestId: requestId,
-              sourceRetrievedAt: new Date().toISOString(),
-            },
-          })),
-        );
-        await setStepProgress(kysely, runId, planStep.id, "completed");
+        // Delegated: a paid, multi-request source is driven through the durable
+        // run_source_requests ledger and may pause (429 / credit cap) or fail.
+        // executeSourceStep sets its own step_progress on completion.
+        const signal = await executeSourceStep(deps, runId, planStep, defStep, plan, leaseToken);
+        if (signal !== "completed") return signal;
         break;
       }
 
@@ -237,7 +222,10 @@ async function runItemStep(
       }
     }
 
-    await processOneItemStep(deps, runId, defStep, item);
+    const itemSignal = await processOneItemStep(deps, runId, defStep, item);
+    // A provider 429 pauses the whole run (pause_reason='rate_limited', resume_at
+    // set inside processOneItemStep) and reschedules; stop draining items here.
+    if (itemSignal === "rate_limited") return "paused";
   }
   return "completed";
 }
@@ -277,6 +265,7 @@ async function processOneItemStep(
       item,
       step: defStep,
       requestKey: claim.requestKey,
+      crashReplay: claim.crashReplay,
       agencyId: (await getRun(kysely, runId)).agency_id,
     };
 
@@ -311,6 +300,16 @@ async function processOneItemStep(
           throw new AppError("INTERNAL", `Step type '${defStep.type}' is not an item step.`, {});
       }
     } catch (err) {
+      if (err instanceof RateLimitError) {
+        // 429: NOT a spent attempt. Revert the claim to pending (attempt
+        // decremented), schedule the retry, and pause the whole run — resume_at
+        // drives the reschedule. Books no cost.
+        const dueAt = new Date(Date.now() + err.retryAfterSeconds * 1000);
+        await deferStepForRateLimit(kysely, claim.step.id, { attempt: claim.attempt, dueAt });
+        assertRunTransition("running", "paused");
+        await setRunStatus(kysely, runId, "paused", { pauseReason: "rate_limited", resumeAt: dueAt });
+        return "rate_limited";
+      }
       if (err instanceof AmbiguousOutcomeError) {
         // Possibly completed and possibly charged: book the provisional cost,
         // park in needs_review, and NEVER auto-retry (double-spend risk).

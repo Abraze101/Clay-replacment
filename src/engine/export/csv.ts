@@ -14,6 +14,9 @@ export const EXPORT_COLUMNS = [
   "locality",
   "region",
   "country",
+  "timezone",
+  "rating",
+  "review_count",
   "business_main_phone",
   "business_main_phone_e164",
   "business_main_phone_format_valid",
@@ -29,6 +32,7 @@ export const EXPORT_COLUMNS = [
   "suppression_status",
   "source_provider",
   "source_record_id",
+  "source_url",
   "retrieved_at",
   "run_item_id",
 ] as const;

@@ -29,6 +29,9 @@ test("agents sdk: MCPServerStdio connects, lists the 12 tools, and calls a read-
       EXPORT_DIR: path.join(workDir, "exports"),
       FAKE_ENRICH_LEDGER_PATH: path.join(workDir, "ledger.json"),
       OPENAI_API_KEY: "",
+      // Keep the fixture deterministic and fast: skip the pg-boss boot the
+      // stdio entry now defaults to (driver choice is irrelevant here).
+      JOB_DRIVER: "inprocess",
     },
     cacheToolsList: true,
     // tsx + PGlite subprocess boot can exceed the 5s default when the whole

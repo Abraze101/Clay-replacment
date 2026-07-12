@@ -3,7 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { AppContainer } from "../app/container.js";
-import { createContainer } from "../app/container.js";
+import { createContainer, defaultJobDriver } from "../app/container.js";
+import { PgBossRunWorker } from "../jobs/pg-boss-worker.js";
 import { migrate } from "../storage/migrate.js";
 import { handleApi } from "./routes.js";
 import { serveStatic } from "./static.js";
@@ -60,8 +61,11 @@ export async function startWebServer(
 }
 
 async function main(): Promise<void> {
-  const app = await createContainer({ actor: "web" });
+  // Long-lived entry: default to the pg-boss driver so delayed rate-limit
+  // resumes fire and the startup sweep recovers due pauses (JOB_DRIVER overrides).
+  const app = await createContainer({ actor: "web", jobDriver: defaultJobDriver("pgboss") });
   await migrate(app.db);
+  if (app.worker instanceof PgBossRunWorker) await app.worker.start();
   const server = await startWebServer(app, { port: app.env.WEB_PORT });
   process.stderr.write(
     `lead-engine web UI listening on http://127.0.0.1:${server.port} (localhost only; auth arrives at M6)\n`,

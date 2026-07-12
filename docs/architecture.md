@@ -107,7 +107,7 @@ The runner supports linear steps and simple conditions. A full arbitrary DAG is 
 
 `Places/local source -> normalize -> dedupe -> website research -> optional Apollo enrichment -> local-business score -> personalize -> review -> export`
 
-Per ADR-023, the M3 source adapter is Firecrawl-based (Google Maps listings, search results, and business websites) rather than the official Places API. The adapter must still persist a stable per-listing identifier, record source URL and retrieved-at metadata for provenance, and stay behind the provider-neutral `SourceProvider` interface so an official-API adapter can replace it without engine changes. Scraped-content freshness and reuse rights are weaker than API data — see the risk list in ADR-023.
+Per ADR-023 as amended by ADR-024, the M3 source adapter is SerpAPI's Google Maps API (research showed Firecrawl cannot reliably scrape Maps pages); Firecrawl covers the optional website-research step (ADR-027). The adapter persists a stable per-listing identifier (`pid:<place_id>` preferred, `cid:<data_cid>` fallback, deterministic name+address hash last), records the source URL and retrieved-at metadata for provenance, and implements the provider-neutral `PagedPaidSource` interface — one billed search request per location/page, driven through the durable `run_source_requests` ledger so a crash, 429, or credit pause never re-pays a completed search. A different Maps API (Serper.dev, Outscraper) or an official-API adapter can replace it without engine changes. Coverage honesty: a named location yields Google's first results page (~20 listings); a `@lat,lon,zoom` location paginates to ~120; per-request coverage notes surface in run status.
 
 The public business phone returned by the source is stored as `business_main`, not assumed to be an owner's direct number. Quick List stops after permitted source fields, normalization, and dedupe. Call-Ready and Full may continue into person/contact discovery and validation after preview and approval.
 
@@ -161,7 +161,7 @@ PostgreSQL is the system of record. Local development can run the identical PG16
 
 ## Background execution
 
-Persistent jobs handle retries, rate-limit handling, crash recovery, and scheduled continuation. pg-boss is the candidate queue: current pg-boss runs on PGlite via `fromPglite`, but that support is new, so Milestone 0 runs a bounded compatibility spike covering filesystem persistence, start/stop/restart, job recovery, retry/backoff, duplicate-claim prevention, cancellation, modest concurrency, and interaction with application transactions where supported. pg-boss stays behind a `JobQueue` interface and is adopted only after the spike passes. Queue job-delivery guarantees are distinct from third-party paid-call side effects.
+Persistent jobs handle retries, rate-limit handling, crash recovery, and scheduled continuation. pg-boss is the adopted queue (ADR-002; the M0 compatibility spike passed 8/8 scenarios) and activated at M3 as `PgBossRunWorker` behind the `JobQueue` interface: one `run-execute` queue with `singletonKey = runId` (the run lease remains the correctness backstop), delayed `startAfter = resume_at` jobs for provider rate-limit pauses, and a startup sweep that resumes due pauses created while no resident worker was running. It shares the app's single database connection (`fromPglite` on PGlite, `fromKysely` on Postgres). Driver selection is per entry point (`JOB_DRIVER`): one-shot CLI commands default to the in-process driver, which self-heals short rate-limit pauses inline; `leads worker` (or the web server) hosts a resident pg-boss worker for longer waits. Queue job-delivery guarantees are distinct from third-party paid-call side effects.
 
 ## Idempotency and paid-provider safety
 
@@ -270,7 +270,7 @@ The application reports whether a required provider is connected without exposin
 ## Safety and compliance baseline
 
 - No LinkedIn scraping or automated LinkedIn actions (permanent).
-- Local-business discovery uses Firecrawl-based scraping of Google Maps listings, search results, and business websites (owner decision, ADR-023 — interim; re-review is mandatory before any managed/beta launch or data resale).
+- Local-business discovery uses SerpAPI's Google Maps API, and optional website research uses Firecrawl (owner decision, ADR-023 as amended by ADR-024 — interim; both vendors scrape inside their own boundaries; re-review is mandatory before any managed/beta launch or data resale).
 - No consumer/patient targeting using health conditions or sensitive health data.
 - Public-site research is rate-limited, respects robots/terms, and targets business pages only.
 - If an official Places-API adapter is (re)introduced, it follows current caching, storage, display, and attribution rules.

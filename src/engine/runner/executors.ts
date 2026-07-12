@@ -1,6 +1,6 @@
 import type { Kysely } from "kysely";
 
-import { AppError } from "../../shared/errors.js";
+import { AmbiguousOutcomeError, AppError } from "../../shared/errors.js";
 import type { AttemptClassification, Database, JsonObject } from "../../storage/database-types.js";
 import type { RunItemRow, RunRow } from "../../storage/repositories/run-repo.js";
 import { attachLead, updateRunItem } from "../../storage/repositories/run-repo.js";
@@ -14,6 +14,7 @@ import { appendGeneratedOutput } from "../../storage/repositories/output-repo.js
 import type { EnrichProvider, ProviderRegistry, SourceRecord } from "../../providers/types.js";
 import { resolveIdentity } from "../dedupe/identity.js";
 import { normalizePhone, normalizeSourceRecord } from "../records/normalize.js";
+import { usStateTimezone } from "../records/timezone.js";
 import { SCORE_TEMPLATES, evaluateTemplate } from "../scoring/templates.js";
 import type { FieldContext } from "../workflow-schema/rules.js";
 import { evaluateRuleGroup } from "../workflow-schema/rules.js";
@@ -84,6 +85,8 @@ export interface ExecCtx {
   item: RunItemRow;
   step: WorkflowStep;
   requestKey: string;
+  /** True when this execution replays a step left `running` by a crash. */
+  crashReplay: boolean;
   agencyId: string;
 }
 
@@ -197,6 +200,11 @@ export function executeDedupe(ctx: ExecCtx): ExecOutcome {
                 normalizedPhone: normalized.phoneE164,
                 sourceProvider: providerName,
                 sourceProviderId: snapshot.source.sourceKey,
+                // Cross-provider Google place_id from a `pid:` source key; numeric CID stays in the snapshot.
+                placeId: snapshot.source.sourceKey.startsWith("pid:")
+                  ? snapshot.source.sourceKey.slice("pid:".length)
+                  : null,
+                timezone: usStateTimezone(normalized.region, normalized.country),
               })
             ).id;
 
@@ -282,6 +290,17 @@ export async function executeResearch(ctx: ExecCtx): Promise<ExecOutcome> {
   const step = ctx.step as ResearchStep;
   const provider = ctx.providers.researchers.get(step.provider);
   if (!provider) throw new AppError("INTERNAL", `Unregistered research provider '${step.provider}'.`, {});
+  const cost = provider.costPerRecord ?? 0;
+  // Crash replay of a PAID research call: unlike the fake enrich provider,
+  // live research providers (Firecrawl) offer no request-key idempotency, so
+  // re-executing could double-charge. The interrupted attempt may have
+  // completed and been billed — book it as ambiguous for review instead.
+  if (ctx.crashReplay && cost > 0) {
+    throw new AmbiguousOutcomeError(
+      `Research step '${step.id}' was interrupted after a paid call may have completed; provider '${provider.name}' cannot confirm or dedupe it.`,
+      cost,
+    );
+  }
   const normalized = requireNormalized(ctx.item);
   const snapshot = snapshotOf(ctx.item);
   const outcome = await provider.research({
@@ -306,7 +325,9 @@ export async function executeResearch(ctx: ExecCtx): Promise<ExecOutcome> {
   }
 
   return {
-    cost: 0,
+    // A live research provider (Firecrawl) charges per successful scrape; the
+    // fake provider is free (costPerRecord undefined).
+    cost: provider.costPerRecord ?? 0,
     classification: "completed",
     providerRequestId: outcome.providerRequestId,
     note: "researched",

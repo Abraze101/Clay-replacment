@@ -81,12 +81,19 @@ export function ProgressScreen({ runId }: { runId: string }): ReactElement {
           </span>
           {status.cancelRequested && active && <span className="chip chip-warn">cancel requested…</span>}
         </div>
-        {status.pauseReason && (
+        {status.pauseReason === "rate_limited" ? (
+          <p className="info-banner">
+            Paused by a provider rate limit.
+            {status.resumeAt
+              ? ` Auto-resumes ${new Date(status.resumeAt).getTime() > now ? `in ~${Math.max(1, Math.ceil((new Date(status.resumeAt).getTime() - now) / 1000))}s` : "shortly"} — no new approval is needed (the budget is unchanged).`
+              : " It will resume automatically."}
+          </p>
+        ) : status.pauseReason ? (
           <p className="info-banner">
             Paused: {status.pauseReason}. Resuming without a bigger budget will pause again at the same point; raising
             the budget needs a fresh preview and approval (start a new preview of the widened scope).
           </p>
-        )}
+        ) : null}
         {stuckPending && (
           <p className="info-banner">
             Still pending — the background worker may not have picked this run up. Retry below or check the server log.
@@ -106,6 +113,21 @@ export function ProgressScreen({ runId }: { runId: string }): ReactElement {
               </li>
             ))}
           </ul>
+        )}
+
+        {status.sourceCoverage.length > 0 && (
+          <>
+            <h3>Source coverage</h3>
+            <ul className="plain-list">
+              {status.sourceCoverage.map((c) => (
+                <li key={c.descriptor}>
+                  <span className={`chip status-${c.status}`}>{c.status}</span> <strong>{c.descriptor}</strong>
+                  {c.recordsInserted !== null && <span> — {c.recordsInserted} record(s)</span>}
+                  {c.coverageNote && <div className="muted">{c.coverageNote}</div>}
+                </li>
+              ))}
+            </ul>
+          </>
         )}
 
         {status.status === "waiting_review" && (

@@ -18,9 +18,10 @@ import {
   runStatus,
 } from "../app/run-service.js";
 import { createWorkflowFromDefinition, listWorkflowSummaries, showWorkflow } from "../app/workflow-service.js";
+import { listProviderStatus, testProviderConnection } from "../app/provider-service.js";
 import { AppError, isAppError } from "../shared/errors.js";
 import { decodeCursor, encodeCursor } from "../shared/pagination.js";
-import type { ProviderStatusInfo, WebExportResult, WorkflowCreateResponse } from "./contracts.js";
+import type { WebExportResult, WorkflowCreateResponse } from "./contracts.js";
 import {
   createWorkflowBodySchema,
   exportBodySchema,
@@ -46,6 +47,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 /** Server-side template allowlist; the browser never sends workflow file paths. */
 const WORKFLOW_TEMPLATES: Record<string, URL> = {
   "local-service-demo": new URL("../../examples/local-service-demo.workflow.json", import.meta.url),
+  "local-business-quick-list": new URL("../../examples/local-business-quick-list.workflow.json", import.meta.url),
 };
 
 export async function handleApi(
@@ -111,7 +113,15 @@ async function route(
   }
 
   if (method === "GET" && seg.length === 1 && seg[0] === "providers") {
-    ok(res, requestId, { providers: providerStatus(app) });
+    ok(res, requestId, { providers: listProviderStatus(app) });
+    return;
+  }
+
+  if (method === "POST" && seg.length === 3 && seg[0] === "providers" && seg[2] === "test") {
+    // Zero-cost connection test (SerpAPI /account, Firecrawl credit-usage);
+    // never spends a search/credit and never returns the key.
+    await readJsonBody(req); // drain
+    ok(res, requestId, await testProviderConnection(app, seg[1] ?? ""));
     return;
   }
 
@@ -236,7 +246,7 @@ async function route(
 
 async function createWorkflow(
   app: AppContainer,
-  body: { definition: Record<string, unknown> } | { template: "local-service-demo" },
+  body: { definition: Record<string, unknown> } | { template: string },
 ): Promise<[WorkflowCreateResponse, number]> {
   if ("definition" in body) {
     const created = await createWorkflowFromDefinition(app, body.definition);
@@ -266,19 +276,3 @@ async function createWorkflow(
   }
 }
 
-function providerStatus(app: AppContainer): ProviderStatusInfo[] {
-  const infos: ProviderStatusInfo[] = [];
-  for (const p of app.providers.sources.values()) {
-    infos.push({ name: p.name, kind: "source", connected: true, paid: false });
-  }
-  for (const p of app.providers.enrichers.values()) {
-    infos.push({ name: p.name, kind: "enrich", connected: true, paid: p.costPerRecord > 0, costPerRecord: p.costPerRecord });
-  }
-  for (const p of app.providers.researchers.values()) {
-    infos.push({ name: p.name, kind: "research", connected: true, paid: false });
-  }
-  for (const p of app.providers.models.values()) {
-    infos.push({ name: p.name, kind: "model", connected: true, paid: true });
-  }
-  return infos;
-}

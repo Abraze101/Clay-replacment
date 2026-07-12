@@ -2,7 +2,8 @@ import type { Env } from "../config/env.js";
 import { parseEnv } from "../config/env.js";
 import type { RunnerDeps } from "../engine/runner/runner.js";
 import { InProcessRunWorker, type JobQueue } from "../jobs/run-worker.js";
-import { buildFakeRegistry } from "../providers/registry.js";
+import { PgBossRunWorker } from "../jobs/pg-boss-worker.js";
+import { buildRegistry, knownProviders, type ProviderCatalogEntry } from "../providers/registry.js";
 import type { ProviderRegistry } from "../providers/types.js";
 import type { Db } from "../storage/db.js";
 import { connectDb } from "../storage/db.js";
@@ -17,6 +18,8 @@ export interface AppContainer {
   env: Env;
   db: Db;
   providers: ProviderRegistry;
+  /** Live providers the product can use, including unconfigured ones (connected:false). */
+  providerCatalog: ProviderCatalogEntry[];
   worker: JobQueue;
   runnerDeps: RunnerDeps;
   agencyId: string;
@@ -25,11 +28,11 @@ export interface AppContainer {
 }
 
 export async function createContainer(
-  overrides: Partial<Env> & { actor?: string } = {},
+  overrides: Partial<Env> & { actor?: string; jobDriver?: "inprocess" | "pgboss" } = {},
 ): Promise<AppContainer> {
   const env: Env = { ...parseEnv(), ...overrides };
   const db = await connectDb(env.DATABASE_URL);
-  const providers = buildFakeRegistry({ enrichLedgerPath: env.FAKE_ENRICH_LEDGER_PATH });
+  const providers = buildRegistry(env, { enrichLedgerPath: env.FAKE_ENRICH_LEDGER_PATH });
   const actor = overrides.actor ?? "cli";
   const runnerDeps: RunnerDeps = {
     db,
@@ -39,15 +42,28 @@ export async function createContainer(
     exportDir: env.EXPORT_DIR,
     actor,
   };
+  // Driver selection: the caller's explicit choice wins (leads worker forces
+  // pgboss); long-lived entries (web, mcp) pass defaultJobDriver('pgboss') so
+  // delayed rate-limit resumes actually fire, still overridable via JOB_DRIVER;
+  // one-shot CLI stays in-process and self-heals short pauses inline.
+  const jobDriver = overrides.jobDriver ?? env.JOB_DRIVER ?? "inprocess";
+  const worker: JobQueue =
+    jobDriver === "pgboss"
+      ? new PgBossRunWorker(runnerDeps, db)
+      : new InProcessRunWorker(runnerDeps, { maxInlineWaitSeconds: env.RATE_LIMIT_INLINE_WAIT_MAX_SECONDS });
   return {
     env,
     db,
     providers,
-    worker: new InProcessRunWorker(runnerDeps),
+    providerCatalog: knownProviders(env),
+    worker,
     runnerDeps,
     agencyId: DEFAULT_AGENCY_ID,
     actor,
-    close: () => db.close(),
+    close: async () => {
+      if (worker instanceof PgBossRunWorker) await worker.stop();
+      await db.close();
+    },
   };
 }
 
@@ -56,7 +72,20 @@ export async function createContainer(
  * server uses this after the initialize handshake to attribute reviews and
  * approvals to `mcp:<clientName>` without reconnecting the database.
  */
+/**
+ * Entry-point driver default that still honors an explicit JOB_DRIVER env
+ * override (the container gives the caller's jobDriver precedence, so entries
+ * must resolve the env themselves before passing their default).
+ */
+export function defaultJobDriver(entryDefault: "pgboss" | "inprocess"): "pgboss" | "inprocess" {
+  const fromEnv = process.env["JOB_DRIVER"];
+  return fromEnv === "pgboss" || fromEnv === "inprocess" ? fromEnv : entryDefault;
+}
+
 export function withActor(app: AppContainer, actor: string): AppContainer {
   const runnerDeps: RunnerDeps = { ...app.runnerDeps, actor };
-  return { ...app, actor, runnerDeps, worker: new InProcessRunWorker(runnerDeps) };
+  // Reuse the SAME worker instance: a second pg-boss on one pglite:// directory
+  // would break the single-driver invariant, and the runner does not read
+  // deps.actor (attribution happens in the app services via app.actor).
+  return { ...app, actor, runnerDeps, worker: app.worker };
 }

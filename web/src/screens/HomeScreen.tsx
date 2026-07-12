@@ -124,7 +124,12 @@ export function HomeScreen(): ReactElement {
       </section>
 
       <section className="card">
-        <h2>Providers</h2>
+        <div className="row row-between">
+          <h2>Providers</h2>
+          <button className="btn btn-small" onClick={() => navigate("/providers")}>
+            Provider setup
+          </button>
+        </div>
         <ProviderStatusPanel providers={providers ?? []} />
       </section>
     </div>
