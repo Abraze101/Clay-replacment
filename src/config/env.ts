@@ -14,6 +14,9 @@ const envSchema = z.object({
   EXPORT_DIR: z.string().min(1).default("./exports"),
   FAKE_ENRICH_LEDGER_PATH: z.string().min(1).default("./.data/fake-enrich-ledger.json"),
   LEASE_TTL_SECONDS: z.coerce.number().int().min(5).max(3600).default(60),
+  APPROVAL_TOKEN_TTL_MINUTES: z.coerce.number().int().min(1).max(1440).default(30),
+  MCP_HTTP_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+  MCP_HTTP_TOKEN: z.string().optional(),
   MAX_STEP_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   // Provider keys are optional in M0 (never used; fake providers only).
   APOLLO_API_KEY: z.string().optional(),

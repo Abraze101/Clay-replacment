@@ -186,11 +186,13 @@ The MVP prepares lists for human callers; it does not place calls or operate a p
 - `run_start`
 - `run_status`
 - `run_cancel`
+- `run_resume`
+- `run_retry`
 - `run_results`
 - `lead_review_update`
 - `run_export_csv`
 
-Every operation has strict input/output schemas and returns structured JSON suitable for any LLM harness, plus a human-readable summary for CLI use.
+Every operation has strict input/output schemas and returns structured JSON suitable for any LLM harness, plus a human-readable summary for CLI use. `run_resume` continues past the review gate or a pause (a budget/cap change requires a fresh approval token), and `run_retry` requeues failed items without touching `needs_review` steps.
 
 `run_preview` and `run_start` accept a validated `enrichmentProfile` plus typed overrides. Paid contact discovery or validation cannot silently start because a source returned new rows.
 

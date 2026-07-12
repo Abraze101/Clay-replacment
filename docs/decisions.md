@@ -21,11 +21,11 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 
 ## ADR-002: pg-boss for background jobs
 
-- **Decision:** Select pg-boss for persistent jobs, behind a `JobQueue` interface; the engine never imports it directly. Adoption lands at M1 when real background execution starts.
+- **Decision:** Select pg-boss for persistent jobs, behind a `JobQueue` interface; the engine never imports it directly. Adoption lands at M3 with the first live rate-limited provider (decided at M1 planning; M1 has no background-execution need beyond the in-process driver).
 - **Date:** 2026-07-10
 - **Evidence:** Bake-off vs graphile-worker/DBOS in `docs/proposals/build-vs-adopt.md` §2; directive §13 corrects the report — current pg-boss supports PGlite via `fromPglite`.
 - **Reason:** Postgres-native retry/backoff, SKIP LOCKED delivery, and transactional enqueue without Redis. Because `fromPglite` support was new, M0 ran the mandated bounded compatibility spike. pg-boss job-delivery guarantees are distinct from third-party paid-call side effects (see directive §11).
-- **Status:** accepted — the M0 spike (2026-07-11, pg-boss 12.25.1 on @electric-sql/pglite 0.5.4, schema v36) passed 8/8 scenarios: `fromPglite` bootstrap, filesystem persistence across restart, crashed-worker recovery via expiration + supervise, bounded retry to terminal failed, duplicate-claim prevention, cancellation, 20-job/4-worker exactly-once concurrency, and enqueue inside an application PGlite transaction (per-call `db` override; rollback discards the job, commit keeps it). Details: `spikes/pg-boss-pglite/README.md`. M0 still ships the in-process claim-and-drain driver; the pg-boss driver activates behind `JobQueue` at M1. Caveat: PGlite is single-connection — parallel-throughput expectations do not transfer from real Postgres.
+- **Status:** accepted — the M0 spike (2026-07-11, pg-boss 12.25.1 on @electric-sql/pglite 0.5.4, schema v36) passed 8/8 scenarios: `fromPglite` bootstrap, filesystem persistence across restart, crashed-worker recovery via expiration + supervise, bounded retry to terminal failed, duplicate-claim prevention, cancellation, 20-job/4-worker exactly-once concurrency, and enqueue inside an application PGlite transaction (per-call `db` override; rollback discards the job, commit keeps it). Details: `spikes/pg-boss-pglite/README.md`. M0 and M1 ship the in-process claim-and-drain driver; the pg-boss driver activates behind `JobQueue` at M3, when the first live rate-limited provider creates a real background-execution need (user decision at M1 planning, 2026-07-11). Caveat: PGlite is single-connection — parallel-throughput expectations do not transfer from real Postgres.
 - **Revisit trigger:** A maintainership change, or the M1 integration contradicting the spike's recovery/transaction semantics.
 
 ## ADR-003: json-rules-engine
@@ -70,7 +70,7 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Date:** 2026-07-10
 - **Evidence:** Directive §16.
 - **Reason:** Projected v2 release dates are forecasts, not guarantees; confinement keeps a later migration cheap.
-- **Status:** accepted
+- **Status:** accepted — M1 (2026-07-11) pinned `@modelcontextprotocol/sdk` 1.29.0 exact; its `zod ^3.25 || ^4.0` peer range was verified against our zod 4.4.3 (native zod-4 raw shapes in the tool schemas, no `zod-to-json-schema`). SDK imports are confined to `src/mcp/` and the MCP test files. `@openai/agents` 0.13.2 is a devDependency used only by the credential-free harness fixture test.
 - **Revisit trigger:** MCP SDK v2 is actually stable.
 
 ## ADR-008: Contact-discovery waterfall vendor

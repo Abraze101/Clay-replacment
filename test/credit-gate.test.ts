@@ -49,17 +49,17 @@ test("credit gate: resuming without more budget re-pauses; a raised budget requi
     // Raising the budget without approval is rejected.
     await assert.rejects(
       () => resumeRun(t.app, run.id, { budget: 20 }),
-      (err: { code?: string }) => err.code === "APPROVAL_MISMATCH",
+      (err: { code?: string }) => err.code === "APPROVAL_REQUIRED",
     );
-    // A wrong hash is rejected too.
+    // An unknown token is rejected too.
     await assert.rejects(
-      () => resumeRun(t.app, run.id, { budget: 20, approval: "not-the-hash" }),
-      (err: { code?: string }) => err.code === "APPROVAL_MISMATCH",
+      () => resumeRun(t.app, run.id, { budget: 20, approval: "not-a-token" }),
+      (err: { code?: string }) => err.code === "APPROVAL_REQUIRED",
     );
 
-    // Preview the new scope, approve its hash, resume: run completes its work.
+    // Preview the new scope, consume its token, resume: run completes its work.
     const reapproval = await previewRun(t.app, slug, { profile: "full", budget: 20 });
-    const resumed = await resumeRun(t.app, run.id, { budget: 20, approval: reapproval.plan.planHash });
+    const resumed = await resumeRun(t.app, run.id, { budget: 20, approval: reapproval.approval.token });
     assert.equal(resumed.status, "waiting_review");
     assert.equal(num(resumed.credits_used), 11, "continued from item 4 without re-spending items 1-3");
     assert.equal(await sumStepCosts(t.app.db.kysely, run.id), 11);

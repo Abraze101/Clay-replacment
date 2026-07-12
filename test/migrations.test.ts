@@ -10,11 +10,11 @@ test("migrations: apply once, re-run is a no-op, checksums recorded", async () =
   const db = await connectDb("pglite://memory");
   try {
     const first = await migrate(db);
-    assert.deepEqual(first.applied, ["0001_init"]);
+    assert.deepEqual(first.applied, ["0001_init", "0002_m1"]);
 
     const second = await migrate(db);
     assert.deepEqual(second.applied, []);
-    assert.deepEqual(second.alreadyApplied, ["0001_init"]);
+    assert.deepEqual(second.alreadyApplied, ["0001_init", "0002_m1"]);
 
     const status = await migrationStatus(db);
     assert.equal(status.length, MIGRATIONS.length);
@@ -76,6 +76,21 @@ test("migrations: 0001 creates the 12 domain tables", async () => {
       // A trivial select proves the table exists with expected shape.
       await db.rawExec(`SELECT * FROM ${table} LIMIT 0;`);
     }
+  } finally {
+    await db.close();
+  }
+});
+
+test("migrations: 0002 adds users, approval_tokens, and created_by attribution (additive)", async () => {
+  const db = await connectDb("pglite://memory");
+  try {
+    await migrate(db);
+    await db.rawExec("SELECT id, agency_id, email, role FROM users LIMIT 0;");
+    await db.rawExec(
+      "SELECT id, nonce, scope_hash, enrichment_profile, paid_record_cap, expires_at, consumed_at, consumed_by_run_id FROM approval_tokens LIMIT 0;",
+    );
+    await db.rawExec("SELECT created_by FROM workflows LIMIT 0;");
+    await db.rawExec("SELECT created_by FROM workflow_versions LIMIT 0;");
   } finally {
     await db.close();
   }

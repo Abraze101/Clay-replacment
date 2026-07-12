@@ -3,7 +3,14 @@
     "apollo": {
       "type": "http",
       "url": "https://mcp.apollo.io/mcp"
+    },
+    "lead_engine": {
+      "type": "stdio",
+      "command": "pnpm",
+      "args": [
+        "run",
+        "mcp:stdio"
+      ]
     }
   }
 }
-

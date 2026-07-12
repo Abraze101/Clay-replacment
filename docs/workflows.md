@@ -53,7 +53,7 @@ The user can say, for example, "Call-Ready, but business main numbers are fine a
 
 ## CLI equivalents
 
-The exact syntax is finalized during implementation, but the command surface should resemble:
+The implemented command surface (M0/M1; `run preview` issues the single-use approval token that `run start` consumes):
 
 ```text
 leads workflow create --file workflow.json
@@ -61,7 +61,10 @@ leads workflow validate <workflow-id>
 leads run preview <workflow-id> --inputs campaign.json
 leads run start <workflow-id> --inputs campaign.json --approval <token>
 leads run status <run-id>
-leads run results <run-id> --status ready
+leads run results <run-id> --status completed
+leads run review <run-id> --approve --all
+leads run resume <run-id> [--budget <n> --cap <n> --approval <fresh-token>]
+leads run retry <run-id>
 leads run cancel <run-id>
 leads export csv <run-id>
 ```

@@ -50,3 +50,13 @@ export async function createContainer(
     close: () => db.close(),
   };
 }
+
+/**
+ * Derive an actor-scoped view of a container (same db/providers/env). The MCP
+ * server uses this after the initialize handshake to attribute reviews and
+ * approvals to `mcp:<clientName>` without reconnecting the database.
+ */
+export function withActor(app: AppContainer, actor: string): AppContainer {
+  const runnerDeps: RunnerDeps = { ...app.runnerDeps, actor };
+  return { ...app, actor, runnerDeps, worker: new InProcessRunWorker(runnerDeps) };
+}

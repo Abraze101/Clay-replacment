@@ -26,6 +26,7 @@ import {
   type RunRow,
 } from "../storage/repositories/run-repo.js";
 import { getLatestVersion, getVersion, getWorkflow } from "../storage/repositories/workflow-repo.js";
+import { consumeApprovalToken, issueApprovalToken, linkApprovalToRun } from "./approval-service.js";
 import type { AppContainer } from "./container.js";
 
 export interface RunOptions {
@@ -41,6 +42,8 @@ export interface PreviewResult {
   workflowVersionId: string;
   workflowVersion: number;
   plan: ResolvedPlan;
+  /** Single-use engine approval issued for exactly this plan hash/scope. */
+  approval: { token: string; expiresAt: string };
 }
 
 function parseOverrides(raw: Record<string, unknown> | undefined): CapabilityOverrides {
@@ -53,12 +56,12 @@ function parseOverrides(raw: Record<string, unknown> | undefined): CapabilityOve
   return result.data;
 }
 
-/**
- * `run preview`: resolve the exact execution plan (steps, estimates, cap,
- * budget) and its plan hash — the approval value. Persists nothing and spends
- * nothing.
- */
-export async function previewRun(app: AppContainer, idOrSlug: string, options: RunOptions): Promise<PreviewResult> {
+/** Resolve the plan for a preview or start without issuing an approval token. */
+async function resolvePreview(
+  app: AppContainer,
+  idOrSlug: string,
+  options: RunOptions,
+): Promise<Omit<PreviewResult, "approval">> {
   const workflow = await getWorkflow(app.db.kysely, idOrSlug, app.agencyId);
   const version = await getLatestVersion(app.db.kysely, workflow.id);
   if (!version) throw new AppError("NOT_FOUND", `Workflow '${idOrSlug}' has no validated version.`, {});
@@ -77,17 +80,35 @@ export async function previewRun(app: AppContainer, idOrSlug: string, options: R
 }
 
 /**
- * `run start --approval <plan-hash>`: recompute the plan from durable state
- * and reject a stale or mismatched approval. Approval is engine-enforced —
- * paid contact work can never silently start because a source returned rows.
+ * `run preview`: resolve the exact execution plan (steps, estimates, cap,
+ * budget) and issue a single-use approval token bound to its plan hash and
+ * full scope. Persists only the token row; spends nothing.
+ */
+export async function previewRun(app: AppContainer, idOrSlug: string, options: RunOptions): Promise<PreviewResult> {
+  const preview = await resolvePreview(app, idOrSlug, options);
+  const issued = await issueApprovalToken(app.db.kysely, {
+    agencyId: app.agencyId,
+    workflowVersionId: preview.workflowVersionId,
+    plan: preview.plan,
+    ttlMinutes: app.env.APPROVAL_TOKEN_TTL_MINUTES,
+  });
+  return { ...preview, approval: { token: issued.token, expiresAt: issued.expiresAt } };
+}
+
+/**
+ * `run start --approval <token>`: recompute the plan from durable state and
+ * consume the token against the recomputed hash (defense in depth — the token
+ * stores the scope AND the hash must match what the engine resolves now).
+ * Approval is engine-enforced — paid contact work can never silently start
+ * because a source returned rows, and no harness prompt substitutes for it.
  */
 export async function startRun(
   app: AppContainer,
   idOrSlug: string,
-  approvalHash: string,
+  approvalToken: string,
   options: RunOptions,
 ): Promise<RunRow> {
-  const run = await createApprovedRun(app, idOrSlug, approvalHash, options);
+  const run = await createApprovedRun(app, idOrSlug, approvalToken, options);
   return await app.worker.runToBoundary(run.id);
 }
 
@@ -95,41 +116,39 @@ export async function startRun(
 export async function createApprovedRun(
   app: AppContainer,
   idOrSlug: string,
-  approvalHash: string,
+  approvalToken: string,
   options: RunOptions,
 ): Promise<RunRow> {
-  const preview = await previewRun(app, idOrSlug, options);
-  if (approvalHash !== preview.plan.planHash) {
-    throw new AppError(
-      "APPROVAL_MISMATCH",
-      "Approval hash does not match the current plan (workflow version, inputs, profile, overrides, cap, or budget changed). Run 'run preview' again and approve the new hash.",
-      { expected: preview.plan.planHash },
-    );
-  }
-  const approval: ApprovalEntry = {
-    id: null,
-    planHash: preview.plan.planHash,
-    profile: preview.plan.profile,
-    overrides: preview.plan.overrides,
-    paidRecordCap: preview.plan.paidRecordCap,
-    creditLimit: preview.plan.creditLimit,
-    estimatedPaidActions: preview.plan.estimatedPaidActions,
-    approvedAt: new Date().toISOString(),
-    source: app.actor,
-    expiresAt: null,
-    consumedAt: null,
-  };
-  return await createRun(app.db.kysely, {
-    agencyId: app.agencyId,
-    workflowVersionId: preview.workflowVersionId,
-    inputs: preview.plan.inputs,
-    profile: preview.plan.profile,
-    overrides: preview.plan.overrides,
-    resolvedPlan: preview.plan as unknown as JsonObject,
-    planHash: preview.plan.planHash,
-    paidRecordCap: preview.plan.paidRecordCap,
-    creditLimit: preview.plan.creditLimit,
-    approval,
+  const preview = await resolvePreview(app, idOrSlug, options);
+  return await app.db.kysely.transaction().execute(async (trx) => {
+    const consumed = await consumeApprovalToken(trx, approvalToken, preview.plan.planHash);
+    const approval: ApprovalEntry = {
+      id: consumed.id,
+      planHash: preview.plan.planHash,
+      profile: preview.plan.profile,
+      overrides: preview.plan.overrides,
+      paidRecordCap: preview.plan.paidRecordCap,
+      creditLimit: preview.plan.creditLimit,
+      estimatedPaidActions: preview.plan.estimatedPaidActions,
+      approvedAt: consumed.consumedAt,
+      source: app.actor,
+      expiresAt: consumed.expiresAt,
+      consumedAt: consumed.consumedAt,
+    };
+    const run = await createRun(trx, {
+      agencyId: app.agencyId,
+      workflowVersionId: preview.workflowVersionId,
+      inputs: preview.plan.inputs,
+      profile: preview.plan.profile,
+      overrides: preview.plan.overrides,
+      resolvedPlan: preview.plan as unknown as JsonObject,
+      planHash: preview.plan.planHash,
+      paidRecordCap: preview.plan.paidRecordCap,
+      creditLimit: preview.plan.creditLimit,
+      approval,
+    });
+    await linkApprovalToRun(trx, consumed.id, run.id);
+    return run;
   });
 }
 
@@ -280,7 +299,8 @@ export async function reviewRun(
 /**
  * `run resume`: reclaim after a crash, continue past the review gate
  * (recording the operator as the gate actor), or lift a credit-cap pause —
- * the latter ONLY with a fresh approval hash covering the new budget/cap.
+ * the latter ONLY by consuming a fresh approval token covering the new
+ * budget/cap (issued by a new `run preview` of the widened scope).
  */
 export async function resumeRun(
   app: AppContainer,
@@ -302,38 +322,43 @@ export async function resumeRun(
       requestedBudget: options.budget ?? num(run.credit_limit),
       providers: app.providers,
     });
-    if (options.approval !== plan.planHash) {
+    const approvalToken = options.approval;
+    if (!approvalToken) {
       throw new AppError(
-        "APPROVAL_MISMATCH",
-        "Changing budget or cap requires a fresh approval: preview the new scope and pass its plan hash via --approval.",
+        "APPROVAL_REQUIRED",
+        "Changing budget or cap requires a fresh approval: preview the new scope and pass the token it issues via --approval.",
         { expected: plan.planHash },
       );
     }
-    await appendApproval(
-      app.db.kysely,
-      runId,
-      {
-        id: null,
-        planHash: plan.planHash,
-        profile: plan.profile,
-        overrides: plan.overrides,
-        paidRecordCap: plan.paidRecordCap,
-        creditLimit: plan.creditLimit,
-        estimatedPaidActions: plan.estimatedPaidActions,
-        approvedAt: new Date().toISOString(),
-        source: app.actor,
-        expiresAt: null,
-        consumedAt: null,
-      },
-      {
-        planHash: plan.planHash,
-        paidRecordCap: plan.paidRecordCap,
-        creditLimit: plan.creditLimit,
-        profile: plan.profile,
-        overrides: plan.overrides,
-        resolvedPlan: plan as unknown as JsonObject,
-      },
-    );
+    await app.db.kysely.transaction().execute(async (trx) => {
+      const consumed = await consumeApprovalToken(trx, approvalToken, plan.planHash);
+      await appendApproval(
+        trx,
+        runId,
+        {
+          id: consumed.id,
+          planHash: plan.planHash,
+          profile: plan.profile,
+          overrides: plan.overrides,
+          paidRecordCap: plan.paidRecordCap,
+          creditLimit: plan.creditLimit,
+          estimatedPaidActions: plan.estimatedPaidActions,
+          approvedAt: consumed.consumedAt,
+          source: app.actor,
+          expiresAt: consumed.expiresAt,
+          consumedAt: consumed.consumedAt,
+        },
+        {
+          planHash: plan.planHash,
+          paidRecordCap: plan.paidRecordCap,
+          creditLimit: plan.creditLimit,
+          profile: plan.profile,
+          overrides: plan.overrides,
+          resolvedPlan: plan as unknown as JsonObject,
+        },
+      );
+      await linkApprovalToRun(trx, consumed.id, runId);
+    });
   }
 
   const fresh = await getRun(app.db.kysely, runId);

@@ -225,14 +225,15 @@ The MCP client model, the embedded assistant model, and the workflow `generate` 
 
 The LLM harness receives narrow tools, not database access or raw provider credentials. Mutating/costly tools expose a preview/approval token.
 
-Example flow:
+Example flow (12 tools total; `run_resume` and `run_retry` complete the lifecycle so a harness can pass the review gate, lift a pause, or requeue failures):
 
 1. `workflow_create` returns a validated draft.
-2. `run_preview` returns sample leads, source limitations, and estimated costs.
+2. `run_preview` returns the resolved plan, estimated costs, and a single-use approval token.
 3. User approves.
-4. `run_start` accepts the approval token.
-5. `run_status` and `run_results` read durable state.
-6. `run_export_csv` exports reviewed results.
+4. `run_start` consumes the approval token.
+5. `run_status` and `run_results` (paginated) read durable state; `lead_review_update` records decisions.
+6. `run_resume` continues past the review gate or a pause — a budget/cap change requires a fresh token; `run_retry` requeues failed items.
+7. `run_export_csv` exports reviewed results.
 
 Tool inputs and outputs use strict JSON schemas. Read-only tools are annotated as read-only; tools that mutate state, spend credits, or export externally are annotated accordingly. The server initialization `instructions` must summarize the preview/approval sequence, cost limits, and prohibited outbound actions, with the most important guidance in the first 512 characters for Codex clients.
 

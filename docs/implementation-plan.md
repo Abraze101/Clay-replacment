@@ -39,14 +39,14 @@ Acceptance:
 
 Deliver:
 
-- Stable model-neutral MCP tool contract for workflow create/validate/list and run preview/start/status/results/cancel/export over the same application services.
+- Stable model-neutral MCP tool contract (12 tools: workflow create/validate/list and run preview/start/status/results/cancel/resume/retry/export plus lead review) over the same application services. `run_resume`/`run_retry` were added at M1 planning so a harness can pass the review gate, lift a credit-cap pause, and requeue failures — the MCP contract must not be weaker than the CLI.
 - Stdio transport for local Claude Code, Codex, and OpenAI Agents SDK use.
 - Auth-ready Streamable HTTP transport over the same tool handlers.
 - `approval_tokens` registry backing the engine-level approval gate.
 - Migration `0002` (`users`, `approval_tokens`, `created_by` attribution on workflows and workflow versions).
 - Strict input/output schemas, tool annotations, server instructions, and paginated structured results.
-- Claude Code, Codex, and OpenAI Agents SDK fixture compatibility with handoff prompts for the fake local, executive, and imported-list workflows.
-- pg-boss adoption decision per the M0 spike ADR, behind the `JobQueue` interface, when real background execution starts.
+- Claude Code, Codex, and OpenAI Agents SDK fixture compatibility driving the fake local workflow (executive and imported-list example workflows arrive with their source adapters at M4).
+- pg-boss stays a devDependency behind the `JobQueue` interface; the driver activates at M3 with the first live rate-limited provider (M1 keeps the in-process driver — see ADR-002).
 
 Acceptance:
 

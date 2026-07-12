@@ -39,6 +39,7 @@ export interface WorkflowsTable {
   description: string | null;
   draft_definition: JsonColumn<JsonObject>;
   archived_at: TimestampColumn | null;
+  created_by: string | null;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
 }
@@ -49,7 +50,41 @@ export interface WorkflowVersionsTable {
   version: number;
   definition: JsonColumn<JsonObject>;
   checksum: string;
+  created_by: string | null;
   created_at: GeneratedTimestamp;
+}
+
+export interface UsersTable {
+  id: Generated<string>;
+  agency_id: string;
+  email: string;
+  display_name: string | null;
+  role: WithDefault<"owner" | "member">;
+  created_at: GeneratedTimestamp;
+}
+
+/**
+ * Engine-level approval registry (0002_m1). The nonce IS the token handed to
+ * the harness/CLI; consumption is a single atomic UPDATE guarded by
+ * consumed_at IS NULL AND expires_at > now(), so a token can start exactly
+ * one run and a scope change (different plan hash) invalidates it.
+ */
+export interface ApprovalTokensTable {
+  id: Generated<string>;
+  agency_id: string;
+  workflow_version_id: string;
+  nonce: string;
+  scope_hash: string;
+  enrichment_profile: EnrichmentProfile;
+  overrides: JsonColumnOpt<JsonObject>;
+  paid_record_cap: number;
+  credit_limit: NumericColumnOpt;
+  estimated_paid_actions: JsonColumnOpt<EstimatedPaidAction[]>;
+  issued_by: string | null;
+  issued_at: GeneratedTimestamp;
+  expires_at: TimestampColumn;
+  consumed_at: TimestampColumn | null;
+  consumed_by_run_id: string | null;
 }
 
 export interface LeadsTable {
@@ -309,6 +344,8 @@ export interface SchemaMigrationsTable {
 
 export interface Database {
   agencies: AgenciesTable;
+  users: UsersTable;
+  approval_tokens: ApprovalTokensTable;
   workflows: WorkflowsTable;
   workflow_versions: WorkflowVersionsTable;
   leads: LeadsTable;

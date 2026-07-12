@@ -202,7 +202,7 @@ const runFlagDefs = (c: Command): Command =>
     .option("--budget <n>", "credit limit for paid steps");
 
 runFlagDefs(runCmd.command("preview <workflow>"))
-  .description("resolve the execution plan, costs, and the approval plan-hash; spends nothing")
+  .description("resolve the execution plan and costs, and issue a single-use approval token; spends nothing")
   .action(async (workflowArg: string, opts: RunFlagOptions) => {
     await run(async (app) => {
       const preview = await previewRun(app, workflowArg, await toRunOptions(opts));
@@ -216,15 +216,16 @@ runFlagDefs(runCmd.command("preview <workflow>"))
             (s) =>
               `  ${s.willRun ? "RUN " : "SKIP"} ${s.id} (${s.type}${s.provider ? `:${s.provider}` : ""})${s.paid ? ` paid @${s.costPerRecord}/record` : ""}${s.excludedBy ? ` [excluded by ${s.excludedBy}]` : ""}`,
           ),
-          `Approve with: leads run start ${workflowArg} --approval ${plan.planHash}${opts.profile ? ` --profile ${opts.profile}` : ""}`,
+          `Approval token (single-use, expires ${preview.approval.expiresAt}): ${preview.approval.token}`,
+          `Approve with: leads run start ${workflowArg} --approval ${preview.approval.token}${opts.profile ? ` --profile ${opts.profile}` : ""}`,
         ],
       };
     })();
   });
 
 runFlagDefs(runCmd.command("start <workflow>"))
-  .requiredOption("--approval <plan-hash>", "plan hash from 'run preview'")
-  .description("start a run; the engine rejects missing or mismatched approvals")
+  .requiredOption("--approval <token>", "single-use approval token from 'run preview'")
+  .description("start a run; the engine rejects missing, expired, consumed, or scope-changed approvals")
   .action(async (workflowArg: string, opts: RunFlagOptions & { approval: string }) => {
     await run(async (app) => {
       const finalRun = await startRun(app, workflowArg, opts.approval, await toRunOptions(opts));
@@ -298,7 +299,7 @@ runCmd
 
 runCmd
   .command("resume <runId>")
-  .option("--approval <plan-hash>", "fresh approval hash (required when changing budget/cap)")
+  .option("--approval <token>", "fresh approval token (required when changing budget/cap)")
   .option("--budget <n>", "new credit limit (requires --approval)")
   .option("--cap <n>", "new paid record cap (requires --approval)")
   .description("resume after review, a pause, or a crash; budget changes need a fresh approval")

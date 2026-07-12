@@ -55,9 +55,9 @@ export async function createDemoWorkflow(app: AppContainer): Promise<string> {
   return created.slug;
 }
 
-/** preview → approve-with-the-real-hash → start; the canonical happy path. */
+/** preview → approve-with-the-issued-token → start; the canonical happy path. */
 export async function previewAndStart(app: AppContainer, slug: string, options: RunOptions = {}) {
   const preview = await previewRun(app, slug, options);
-  const run = await startRun(app, slug, preview.plan.planHash, options);
+  const run = await startRun(app, slug, preview.approval.token, options);
   return { preview, run };
 }

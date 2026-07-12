@@ -19,7 +19,7 @@ test("crash-resume: fault after provider call, before commit — no double spend
   try {
     const slug = await createDemoWorkflow(t.app);
     const preview = await previewRun(t.app, slug, { profile: "full" });
-    const run = await createApprovedRun(t.app, slug, preview.plan.planHash, { profile: "full" });
+    const run = await createApprovedRun(t.app, slug, preview.approval.token, { profile: "full" });
 
     let crashed = false;
     const crashingDeps = {
@@ -79,7 +79,7 @@ test("crash-resume: crash during a FREE step also resumes exactly where it stopp
   try {
     const slug = await createDemoWorkflow(t.app);
     const preview = await previewRun(t.app, slug, { profile: "quick_list" });
-    const run = await createApprovedRun(t.app, slug, preview.plan.planHash, { profile: "quick_list" });
+    const run = await createApprovedRun(t.app, slug, preview.approval.token, { profile: "quick_list" });
 
     let calls = 0;
     const crashingDeps = {

@@ -29,18 +29,18 @@ test("plan hash: every approval-scoped dimension changes the hash", async () => 
   }
 });
 
-test("plan hash: a stale approval is rejected after the workflow version changes", async () => {
+test("plan hash: a stale approval token is rejected after the workflow version changes", async () => {
   const t = await createTestApp();
   try {
     const slug = await createDemoWorkflow(t.app);
-    const staleHash = (await previewRun(t.app, slug, { profile: "quick_list" })).plan.planHash;
+    const stale = await previewRun(t.app, slug, { profile: "quick_list" });
 
     const changed = demoDefinition();
     (changed as { name: string }).name = "Changed after preview";
     await validateWorkflow(t.app, slug, changed);
 
     await assert.rejects(
-      () => startRun(t.app, slug, staleHash, { profile: "quick_list" }),
+      () => startRun(t.app, slug, stale.approval.token, { profile: "quick_list" }),
       (err: { code?: string }) => err.code === "APPROVAL_MISMATCH",
     );
   } finally {
@@ -48,13 +48,13 @@ test("plan hash: a stale approval is rejected after the workflow version changes
   }
 });
 
-test("plan hash: a wrong or absent hash never starts a run (engine-level approval, not harness courtesy)", async () => {
+test("plan hash: an unknown or absent token never starts a run (engine-level approval, not harness courtesy)", async () => {
   const t = await createTestApp();
   try {
     const slug = await createDemoWorkflow(t.app);
     await assert.rejects(
-      () => startRun(t.app, slug, "0000not-a-hash", { profile: "quick_list" }),
-      (err: { code?: string }) => err.code === "APPROVAL_MISMATCH",
+      () => startRun(t.app, slug, "0000not-a-token", { profile: "quick_list" }),
+      (err: { code?: string }) => err.code === "APPROVAL_REQUIRED",
     );
     const runs = await t.app.db.kysely.selectFrom("runs").selectAll().execute();
     assert.equal(runs.length, 0, "no run row is created on a rejected approval");
@@ -63,13 +63,13 @@ test("plan hash: a wrong or absent hash never starts a run (engine-level approva
   }
 });
 
-test("plan hash: quick_list approval cannot start a call_ready run (profile bound into the scope)", async () => {
+test("plan hash: a quick_list token cannot start a call_ready run (profile bound into the scope)", async () => {
   const t = await createTestApp();
   try {
     const slug = await createDemoWorkflow(t.app);
-    const quickHash = (await previewRun(t.app, slug, { profile: "quick_list" })).plan.planHash;
+    const quick = await previewRun(t.app, slug, { profile: "quick_list" });
     await assert.rejects(
-      () => startRun(t.app, slug, quickHash, { profile: "call_ready" }),
+      () => startRun(t.app, slug, quick.approval.token, { profile: "call_ready" }),
       (err: { code?: string }) => err.code === "APPROVAL_MISMATCH",
     );
   } finally {

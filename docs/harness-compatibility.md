@@ -22,7 +22,7 @@ The CLI, MCP server, web UI, and embedded AI assistant call the same application
 
 ## Stable boundary
 
-Every harness receives the same MCP tools and strict JSON schemas:
+Every harness receives the same 12 MCP tools and strict JSON schemas:
 
 - `workflow_create`
 - `workflow_validate`
@@ -31,9 +31,13 @@ Every harness receives the same MCP tools and strict JSON schemas:
 - `run_start`
 - `run_status`
 - `run_cancel`
+- `run_resume`
+- `run_retry`
 - `run_results`
 - `lead_review_update`
 - `run_export_csv`
+
+`run_resume` and `run_retry` were added during M1 planning: without them a harness cannot continue a run past the review gate, lift a credit-cap pause (with a fresh approval token), or requeue failed items — the CLI could and the MCP contract must not be weaker.
 
 Tool results use a consistent envelope containing `ok`, `data`, `summary`, `warnings`, `requestId`, and any permitted `nextActions`. Errors use machine-readable codes and retry guidance instead of prompt-specific prose.
 
@@ -61,7 +65,7 @@ Use the current stable MCP TypeScript SDK v1.x line until the next major version
 | Plain automation | CLI | Internal application API/job trigger |
 | Web UI (Milestone 2) | Application services in-process | Hosted UI over the same services (Milestone 6) |
 
-Codex supports project-scoped MCP configuration for trusted projects. Add the actual configuration only after Milestone 1 creates a tested start command. The expected local shape will be:
+Codex supports project-scoped MCP configuration for trusted projects. The start commands exist and are contract-tested as of M1: `pnpm mcp:stdio` (stdio) and `pnpm mcp:http` (Streamable HTTP on `MCP_HTTP_PORT`, default 3001, optional `MCP_HTTP_TOKEN` bearer check). Both entries apply pending migrations idempotently at startup. The local Codex shape (substitute the absolute project path):
 
 ```toml
 [mcp_servers.lead_engine]
@@ -71,7 +75,19 @@ cwd = "/absolute/path/to/project"
 default_tools_approval_mode = "writes"
 ```
 
-The implementation handoff must replace the path with the real project path and validate the command before committing this file.
+For Claude Code, the equivalent project-scoped entry in `.mcp.json` is:
+
+```json
+{
+  "mcpServers": {
+    "lead_engine": {
+      "type": "stdio",
+      "command": "pnpm",
+      "args": ["run", "mcp:stdio"]
+    }
+  }
+}
+```
 
 ## Approval behavior
 

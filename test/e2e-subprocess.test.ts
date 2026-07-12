@@ -37,14 +37,14 @@ test("e2e: the full CLI flow survives process exits between every command", { ti
     await cli("db", "migrate");
     await cli("workflow", "create", "--file", path.join(projectRoot, "examples", "local-service-demo.workflow.json"));
 
-    const preview = parse<{ plan: { planHash: string } }>(
+    const preview = parse<{ plan: { planHash: string }; approval: { token: string } }>(
       (await cli("run", "preview", "local-service-demo", "--profile", "full")).stdout,
     );
     assert.ok(preview.ok);
-    const planHash = preview.data.plan.planHash;
+    const approvalToken = preview.data.approval.token;
 
     const started = parse<{ runId: string; status: string; creditsUsed: number }>(
-      (await cli("run", "start", "local-service-demo", "--profile", "full", "--approval", planHash)).stdout,
+      (await cli("run", "start", "local-service-demo", "--profile", "full", "--approval", approvalToken)).stdout,
     );
     assert.equal(started.data.status, "waiting_review");
     const runId = started.data.runId;
@@ -74,12 +74,22 @@ test("e2e: the full CLI flow survives process exits between every command", { ti
     const lines = readFileSync(exported.data.filePath, "utf8").trimEnd().split("\r\n");
     assert.equal(lines.length, 10);
 
-    // A stale approval is rejected by a fresh process too.
+    // A scope change is rejected by a fresh process too (the full-profile
+    // token cannot start call_ready, even before its consumption is checked).
     await assert.rejects(
-      () => cli("run", "start", "local-service-demo", "--profile", "call_ready", "--approval", planHash),
+      () => cli("run", "start", "local-service-demo", "--profile", "call_ready", "--approval", approvalToken),
       (err: { stdout?: string }) => {
         const envelope = JSON.parse(err.stdout ?? "{}") as { ok?: boolean; error?: { code?: string } };
         return envelope.ok === false && envelope.error?.code === "APPROVAL_MISMATCH";
+      },
+    );
+
+    // Reusing the consumed token for its own scope is rejected as consumed.
+    await assert.rejects(
+      () => cli("run", "start", "local-service-demo", "--profile", "full", "--approval", approvalToken),
+      (err: { stdout?: string }) => {
+        const envelope = JSON.parse(err.stdout ?? "{}") as { ok?: boolean; error?: { code?: string } };
+        return envelope.ok === false && envelope.error?.code === "APPROVAL_CONSUMED";
       },
     );
   } finally {
