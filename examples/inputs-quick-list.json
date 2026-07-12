@@ -1,0 +1,6 @@
+{
+  "businessType": "roofing contractor",
+  "locations": ["Austin, TX"],
+  "limit": 15,
+  "enrichmentProfile": "quick_list"
+}

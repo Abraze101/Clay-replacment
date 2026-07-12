@@ -1,0 +1,33 @@
+{
+  "id": "local-service-demo",
+  "version": 1,
+  "name": "Local service business leads (fake demo)",
+  "description": "Milestone 0 demo workflow exercising all 10 approved step types against the fake providers.",
+  "inputs": {
+    "businessType": "roofing contractor",
+    "locations": ["Austin, TX"],
+    "limit": 15,
+    "enrichmentProfile": "full"
+  },
+  "steps": [
+    { "id": "discover", "type": "source", "provider": "fake-places" },
+    { "id": "normalize", "type": "normalize" },
+    { "id": "dedupe", "type": "dedupe" },
+    {
+      "id": "screen",
+      "type": "filter",
+      "conditions": {
+        "any": [
+          { "field": "has_website", "op": "eq", "value": true },
+          { "field": "phone_format_valid", "op": "eq", "value": true }
+        ]
+      }
+    },
+    { "id": "website", "type": "research", "provider": "fake-website", "profiles": ["call_ready", "full"] },
+    { "id": "owner", "type": "enrich", "provider": "fake-apollo", "optional": true, "profiles": ["call_ready", "full"] },
+    { "id": "fit", "type": "score", "template": "local-service", "profiles": ["full"] },
+    { "id": "opener", "type": "generate", "template": "agency-opener", "profiles": ["full"] },
+    { "id": "review", "type": "review_gate" },
+    { "id": "export", "type": "export", "format": "csv" }
+  ]
+}

@@ -1,0 +1,88 @@
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * The end-to-end proof that no state lives in a conversation or a process:
+ * every CLI command below runs in its OWN subprocess against the same on-disk
+ * PGlite database. migrate → create → preview → start → (process exits) →
+ * status → review → results → resume → export.
+ */
+test("e2e: the full CLI flow survives process exits between every command", { timeout: 420_000 }, async () => {
+  const workDir = mkdtempSync(path.join(tmpdir(), "lead-engine-e2e-"));
+  const projectRoot = path.resolve();
+  const tsx = path.join(projectRoot, "node_modules", ".bin", "tsx");
+  const cliEntry = path.join(projectRoot, "src", "cli", "index.ts");
+  const env = {
+    ...process.env,
+    DATABASE_URL: `pglite://${path.join(workDir, "db")}`,
+    EXPORT_DIR: path.join(workDir, "exports"),
+    FAKE_ENRICH_LEDGER_PATH: path.join(workDir, "ledger.json"),
+  };
+
+  async function cli(...args: string[]): Promise<{ stdout: string }> {
+    return await execFileAsync(tsx, [cliEntry, "--json", ...args], { env, cwd: projectRoot });
+  }
+  function parse<T>(stdout: string): { ok: boolean; data: T; summary: string } {
+    return JSON.parse(stdout) as { ok: boolean; data: T; summary: string };
+  }
+
+  try {
+    await cli("db", "migrate");
+    await cli("workflow", "create", "--file", path.join(projectRoot, "examples", "local-service-demo.workflow.json"));
+
+    const preview = parse<{ plan: { planHash: string } }>(
+      (await cli("run", "preview", "local-service-demo", "--profile", "full")).stdout,
+    );
+    assert.ok(preview.ok);
+    const planHash = preview.data.plan.planHash;
+
+    const started = parse<{ runId: string; status: string; creditsUsed: number }>(
+      (await cli("run", "start", "local-service-demo", "--profile", "full", "--approval", planHash)).stdout,
+    );
+    assert.equal(started.data.status, "waiting_review");
+    const runId = started.data.runId;
+
+    // New process: the durable state is all there.
+    const status = parse<{ status: string; counts: { items: number }; creditsUsed: number }>(
+      (await cli("run", "status", runId)).stdout,
+    );
+    assert.equal(status.data.status, "waiting_review");
+    assert.equal(status.data.counts.items, 15);
+    assert.equal(status.data.creditsUsed, 11);
+
+    const reviewed = parse<{ updated: number }>((await cli("run", "review", runId, "--approve", "--all")).stdout);
+    assert.equal(reviewed.data.updated, 11);
+
+    const results = parse<{ runItemId: string }[]>((await cli("run", "results", runId)).stdout);
+    assert.equal(results.data.length, 15);
+
+    const resumed = parse<{ status: string }>((await cli("run", "resume", runId)).stdout);
+    assert.equal(resumed.data.status, "completed");
+
+    const exported = parse<{ filePath: string; rowCount: number; noop: boolean }>(
+      (await cli("export", "csv", runId)).stdout,
+    );
+    assert.equal(exported.data.rowCount, 9);
+    assert.ok(existsSync(exported.data.filePath));
+    const lines = readFileSync(exported.data.filePath, "utf8").trimEnd().split("\r\n");
+    assert.equal(lines.length, 10);
+
+    // A stale approval is rejected by a fresh process too.
+    await assert.rejects(
+      () => cli("run", "start", "local-service-demo", "--profile", "call_ready", "--approval", planHash),
+      (err: { stdout?: string }) => {
+        const envelope = JSON.parse(err.stdout ?? "{}") as { ok?: boolean; error?: { code?: string } };
+        return envelope.ok === false && envelope.error?.code === "APPROVAL_MISMATCH";
+      },
+    );
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
+});

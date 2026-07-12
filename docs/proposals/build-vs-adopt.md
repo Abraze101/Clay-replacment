@@ -1,6 +1,6 @@
 # Build vs adopt: Clay-alternative landscape and tool selection (proposal)
 
-Status: **corrected 2026-07-10 per `consolidated-revision-directive.md`; decisions tracked in `docs/decisions.md`.** Produced 2026-07-10 from a five-lens web/GitHub sweep (85 unique candidates), 16 primary-source deep-dives (license files, npm metadata, release history), and a synthesis against `docs/architecture.md`, `docs/implementation-plan.md`, and `docs/proposals/database-schema.md`. Decisions here feed the milestone plans. Scraping-class rejections are permanent project guardrails; library/vendor selections are ADR entries with revisit triggers in `docs/decisions.md`.
+Status: **corrected 2026-07-10 per `consolidated-revision-directive.md`; decisions tracked in `docs/decisions.md`. M0 outcome (2026-07-11): Kysely's official `PGliteDialect` and pg-boss's `fromPglite` verified on the installed packages; the pg-boss/PGlite spike passed 8/8 (ADR-002 accepted); TypeScript pinned to 5.9.x after typescript-eslint proved incompatible with 7.0.2 (ADR-022).** Produced 2026-07-10 from a five-lens web/GitHub sweep (85 unique candidates), 16 primary-source deep-dives (license files, npm metadata, release history), and a synthesis against `docs/architecture.md`, `docs/implementation-plan.md`, and `docs/proposals/database-schema.md`. Decisions here feed the milestone plans. Scraping-class rejections are permanent project guardrails; library/vendor selections are ADR entries with revisit triggers in `docs/decisions.md`.
 
 # Build-vs-Adopt Research Report — Lead Engine
 

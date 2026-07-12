@@ -1,6 +1,6 @@
 # Finalized database schema (proposal)
 
-Status: **proposed — revised 2026-07-10 per `consolidated-revision-directive.md`** — finalized target data model for the lead engine, awaiting Milestone 0 implementation approval. On acceptance, the Milestone 0 migration embeds the untagged DDL below, and `docs/architecture.md` is updated to reference this document.
+Status: **accepted at Milestone 0 (2026-07-11)** — the untagged DDL below is applied verbatim as migration `0001_init` (12 domain tables + `schema_migrations`) and validated by the M0 vertical slice; `docs/architecture.md` references this document. Items tagged M1/M3/M4/M5/M6 remain proposed for their milestones. Revised 2026-07-10 per `consolidated-revision-directive.md`.
 
 Everything **untagged** lands in migration `0001_init` (Milestone 0). Tables and columns tagged **M1/M3/M4/M5** land in the additive migration for that milestone, under the revised sequence: M0 engine skeleton, M1 harness adapter, M2 minimal UI (no migration), M3 local-business workflow, M4 professional + imported workflows, M5 contact enrichment + MiniMax assistance, M6 personal VPS / managed beta (credentials/auth sketch only). Nothing post-0001 requires a rewrite or backfill of typed data.
 

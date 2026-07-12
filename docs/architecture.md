@@ -137,24 +137,24 @@ This lets an agency reuse the same engine as it moves from city-level prospectin
 
 | Table | Purpose |
 |---|---|
-| `users` | Operator identity. |
+| `users` | Operator identity (lands M1 with authenticated transports). |
 | `agencies` | Minimal owner/team boundary. |
 | `workflows` | Workflow identity and editable draft. |
 | `workflow_versions` | Immutable validated configuration. |
 | `runs` | Version, inputs, approvals, state, counts, and budgets. |
 | `approval_tokens` | Short-lived approval scope: workflow version, inputs, profile, overrides, record cap, budget, plan hash, and consumption state. |
-| `run_items` | Per-lead step status, attempts, result references, and errors. |
+| `run_items` | Per-lead step status, attempts, result references, errors, and the numeric fit score (its explanation lives in `generated_outputs`). |
 | `run_item_steps` | Per-step attempt state, internal request key, provider request ID, and cost classification. |
 | `leads` | Canonical business/person fields and stable identifiers. |
 | `identity_conflicts` | Flagged conflicting identifiers held for operator resolution instead of automatic merges. |
 | `contact_points` | Multiple phones/emails, their role, source, normalized value, and current best status. |
 | `contact_point_checks` | Append-only validation method, provider result, confidence, and checked-at history. |
-| `suppressions` | Entity-specific do-not-contact entries and operator review metadata. |
+| `suppressions` | Entity-specific do-not-contact entries and operator review metadata (lands M5 with the call-readiness policy). |
 | `lead_sources` | Provider IDs, retrieval metadata, and permitted source snapshot. |
 | `generated_outputs` | Score explanation, prompt version, evidence, and copy. |
 | `exports` | CSV/CRM result and idempotency state. |
 
-This remains a normal relational model. Do not build a generalized data warehouse. The full proposed schema in `docs/proposals/database-schema.md` is the target model; it remains proposed until the Milestone 0 vertical slice validates it.
+This remains a normal relational model. Do not build a generalized data warehouse. The full schema in `docs/proposals/database-schema.md` is the target model; its untagged Milestone 0 portion was validated and applied as migration `0001_init` by the M0 vertical slice (2026-07-11), and the milestone-tagged remainder stays proposed for its milestones.
 
 PostgreSQL is the system of record. Local development can run the identical PG16-compatible DDL on embedded PGlite; hosted operation uses real PostgreSQL.
 

@@ -2,7 +2,7 @@
 
 This workspace contains the product and engineering plan for a workflow-driven lead-generation engine inspired by Angus Sewell's "build it yourself" Clay example.
 
-Status: documentation revised 2026-07-10 per the [consolidated revision directive](docs/proposals/consolidated-revision-directive.md). Milestone 0 is awaiting approval; package/config scaffolding has started, and application modules have not been implemented yet.
+Status: Milestone 0 (engine skeleton) is implemented and validated (2026-07-11) — headless engine, fake providers, persistent runs, plan-hash approvals, CLI, CSV export, 21 offline test files, and the passing pg-boss/PGlite spike. Documentation follows the [consolidated revision directive](docs/proposals/consolidated-revision-directive.md) (2026-07-10). Next: Milestone 1, the harness adapter (MCP over stdio + Streamable HTTP).
 
 ## What we are building
 

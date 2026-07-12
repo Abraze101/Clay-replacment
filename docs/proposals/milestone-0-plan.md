@@ -1,6 +1,6 @@
 # Milestone 0 implementation plan (proposal)
 
-Status: **revised 2026-07-10 per `consolidated-revision-directive.md` — awaiting user approval; do not implement until approved.**
+Status: **implemented 2026-07-11 — the plan was approved and executed; `pnpm check` (lint, typecheck, 21 offline test files, build), the CLI demo flow, and the pg-boss/PGlite spike (8/8, ADR-002) all pass. One locked-default fallback triggered: TypeScript pinned to 5.9.x after typescript-eslint proved incompatible with 7.0.2 (user-approved; ADR-022).**
 Written 2026-07-10 as a session handoff. Companion documents (read all together):
 
 - `docs/proposals/consolidated-revision-directive.md` — authoritative; supersedes conflicting statements in the other proposals and in this plan.

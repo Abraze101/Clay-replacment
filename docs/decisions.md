@@ -24,9 +24,9 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Decision:** Select pg-boss for persistent jobs, behind a `JobQueue` interface; the engine never imports it directly. Adoption lands at M1 when real background execution starts.
 - **Date:** 2026-07-10
 - **Evidence:** Bake-off vs graphile-worker/DBOS in `docs/proposals/build-vs-adopt.md` §2; directive §13 corrects the report — current pg-boss supports PGlite via `fromPglite`.
-- **Reason:** Postgres-native retry/backoff, SKIP LOCKED delivery, and transactional enqueue without Redis. Because `fromPglite` support is new, M0 runs a bounded compatibility spike: filesystem persistence, start/stop/restart, job recovery, retry/backoff, duplicate-claim prevention, cancellation, modest concurrency, interaction with application transactions where supported. pg-boss job-delivery guarantees are distinct from third-party paid-call side effects (see directive §11).
-- **Status:** pending (M0 PGlite spike)
-- **Revisit trigger:** Spike failure or a maintainership change.
+- **Reason:** Postgres-native retry/backoff, SKIP LOCKED delivery, and transactional enqueue without Redis. Because `fromPglite` support was new, M0 ran the mandated bounded compatibility spike. pg-boss job-delivery guarantees are distinct from third-party paid-call side effects (see directive §11).
+- **Status:** accepted — the M0 spike (2026-07-11, pg-boss 12.25.1 on @electric-sql/pglite 0.5.4, schema v36) passed 8/8 scenarios: `fromPglite` bootstrap, filesystem persistence across restart, crashed-worker recovery via expiration + supervise, bounded retry to terminal failed, duplicate-claim prevention, cancellation, 20-job/4-worker exactly-once concurrency, and enqueue inside an application PGlite transaction (per-call `db` override; rollback discards the job, commit keeps it). Details: `spikes/pg-boss-pglite/README.md`. M0 still ships the in-process claim-and-drain driver; the pg-boss driver activates behind `JobQueue` at M1. Caveat: PGlite is single-connection — parallel-throughput expectations do not transfer from real Postgres.
+- **Revisit trigger:** A maintainership change, or the M1 integration contradicting the spike's recovery/transaction semantics.
 
 ## ADR-003: json-rules-engine
 
@@ -198,3 +198,12 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Reason:** Embedded public-suffix list is offline and CI-safe; correct eTLD+1 keys are load-bearing for business dedupe.
 - **Status:** accepted
 - **Revisit trigger:** Embedded PSL staleness causing dedupe misses or false merges.
+
+## ADR-022: TypeScript pinned to 5.9.x
+
+- **Decision:** Pin `typescript` to 5.9.x (exact) instead of the scaffolded 7.0.2.
+- **Date:** 2026-07-11
+- **Evidence:** M0 validation — `tsc`/`tsx` work on 7.0.2, but typescript-eslint (8.63.0, the latest) crashes against the TS 7 JS API (`ModuleKind` surface change), and no lint-toolchain upgrade path exists. This was the M0 plan's named risk and locked-default fallback; the user approved the downgrade on 2026-07-11.
+- **Reason:** One supported toolchain for compiler, runner, and type-aware linting beats native-compiler speed at this codebase size; `no-floating-promises` and friends are load-bearing for an async engine.
+- **Status:** accepted
+- **Revisit trigger:** typescript-eslint (or its successor) shipping TypeScript 7 support.
