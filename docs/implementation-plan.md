@@ -67,7 +67,7 @@ Deliver a bare-bones web UI over the fake provider and the existing application 
 - Progress view with cancel.
 - Results table with review updates and export.
 
-The UI framework choice is an ADR decided at M2 planning. No migration is required.
+The UI framework is decided: ADR-017 — Vite + React SPA over a thin JSON API on the shared application services. No migration is required.
 
 Acceptance:
 

@@ -17,6 +17,7 @@ import {
   latestApproval,
   appendApproval,
   listRunItems,
+  listRunsWithWorkflow,
   listStepsForRun,
   passReviewGate,
   requestCancel,
@@ -219,6 +220,36 @@ export async function runStatus(app: AppContainer, runId: string): Promise<RunSt
   };
 }
 
+export interface RunListItem {
+  runId: string;
+  workflowSlug: string;
+  workflowName: string;
+  status: string;
+  pauseReason: string | null;
+  profile: string;
+  creditsUsed: number;
+  creditLimit: number;
+  createdAt: string | null;
+  completedAt: string | null;
+}
+
+/** Recent runs with workflow identity, newest first (Home screen listing). */
+export async function listRunSummaries(app: AppContainer, limit = 50): Promise<RunListItem[]> {
+  const rows = await listRunsWithWorkflow(app.db.kysely, app.agencyId, limit);
+  return rows.map((row) => ({
+    runId: row.id,
+    workflowSlug: row.workflow_slug,
+    workflowName: row.workflow_name,
+    status: row.status,
+    pauseReason: row.pause_reason,
+    profile: row.enrichment_profile,
+    creditsUsed: num(row.credits_used),
+    creditLimit: num(row.credit_limit),
+    createdAt: iso(row.created_at),
+    completedAt: iso(row.completed_at),
+  }));
+}
+
 export interface RunItemResult {
   runItemId: string;
   position: number;
@@ -307,6 +338,21 @@ export async function resumeRun(
   runId: string,
   options: { approval?: string; budget?: number; cap?: number },
 ): Promise<RunRow> {
+  await prepareResume(app, runId, options);
+  return await app.worker.runToBoundary(runId);
+}
+
+/**
+ * Everything `run resume` does except executing: consume a fresh approval for a
+ * budget/cap change and move the run back to `running`. The web API responds
+ * after this and kicks execution in the background so approval and state
+ * errors still surface synchronously.
+ */
+export async function prepareResume(
+  app: AppContainer,
+  runId: string,
+  options: { approval?: string; budget?: number; cap?: number },
+): Promise<RunRow> {
   const run = await getRun(app.db.kysely, runId);
 
   if (options.budget !== undefined || options.cap !== undefined) {
@@ -372,11 +418,18 @@ export async function resumeRun(
   } else if (fresh.status === "completed" || fresh.status === "failed" || fresh.status === "cancelled") {
     throw new AppError("RUN_NOT_RUNNABLE", `Run is ${fresh.status}; use 'run retry' for failed items.`, { runId });
   }
-  return await app.worker.runToBoundary(runId);
+  return await getRun(app.db.kysely, runId);
 }
 
 /** `run retry`: requeue failed steps/items (rotating request keys) and continue. needs_review is untouched. */
 export async function retryRun(app: AppContainer, runId: string): Promise<RunRow> {
+  const { run, requeued } = await prepareRetry(app, runId);
+  if (requeued === 0) return run;
+  return await app.worker.runToBoundary(runId);
+}
+
+/** Everything `run retry` does except executing (see prepareResume). */
+export async function prepareRetry(app: AppContainer, runId: string): Promise<{ run: RunRow; requeued: number }> {
   const run = await getRun(app.db.kysely, runId);
   if (run.status === "running" || run.status === "waiting_review" || run.status === "paused") {
     throw new AppError("RUN_NOT_RUNNABLE", `Run is ${run.status}; retry applies to completed or failed runs.`, { runId });
@@ -385,12 +438,12 @@ export async function retryRun(app: AppContainer, runId: string): Promise<RunRow
     throw new AppError("RUN_NOT_RUNNABLE", "Cancelled runs are not retried.", { runId });
   }
   const requeued = await requeueFailedSteps(app.db.kysely, runId);
-  if (requeued === 0) return run;
+  if (requeued === 0) return { run, requeued: 0 };
   // Clear completed markers for re-entry (item steps recompute from the ledger).
   assertRunTransition(run.status, "running");
   await setRunStatus(app.db.kysely, runId, "running", { completedAt: undefined });
   await clearStepProgressForRetry(app, runId);
-  return await app.worker.runToBoundary(runId);
+  return { run: await getRun(app.db.kysely, runId), requeued };
 }
 
 async function clearStepProgressForRetry(app: AppContainer, runId: string): Promise<void> {

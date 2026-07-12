@@ -65,7 +65,7 @@ Use the current stable MCP TypeScript SDK v1.x line until the next major version
 | Plain automation | CLI | Internal application API/job trigger |
 | Web UI (Milestone 2) | Application services in-process | Hosted UI over the same services (Milestone 6) |
 
-Codex supports project-scoped MCP configuration for trusted projects. The start commands exist and are contract-tested as of M1: `pnpm mcp:stdio` (stdio) and `pnpm mcp:http` (Streamable HTTP on `MCP_HTTP_PORT`, default 3001, optional `MCP_HTTP_TOKEN` bearer check). Both entries apply pending migrations idempotently at startup. The local Codex shape (substitute the absolute project path):
+Codex supports project-scoped MCP configuration for trusted projects. The start commands exist and are contract-tested as of M1: `pnpm mcp:stdio` (stdio) and `pnpm mcp:http` (Streamable HTTP on `MCP_HTTP_PORT`, default 3001, optional `MCP_HTTP_TOKEN` bearer check). Both entries apply pending migrations idempotently at startup, as does the M2 web UI server (`pnpm web`). PGlite is single-connection: do not run `pnpm web` and `pnpm mcp:http` (or any two long-lived entries) against the same `pglite://` directory at the same time — use the PostgreSQL `DATABASE_URL` to run both concurrently. The local Codex shape (substitute the absolute project path):
 
 ```toml
 [mcp_servers.lead_engine]

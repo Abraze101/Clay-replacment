@@ -25,6 +25,7 @@ import {
 import { overridesSchema } from "../engine/workflow-schema/overrides.js";
 import { profileSchema } from "../engine/workflow-schema/steps.js";
 import { AppError, isAppError } from "../shared/errors.js";
+import { decodeCursor, encodeCursor } from "../shared/pagination.js";
 
 /**
  * The 12-tool model-neutral contract (M1). Handlers are thin calls into the
@@ -159,23 +160,6 @@ const runIdField = z.string().describe("Durable run id returned by run_start.");
 
 const readOnly: ToolAnnotations = { readOnlyHint: true, openWorldHint: false };
 const mutating: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
-
-function encodeCursor(offset: number): string {
-  return Buffer.from(JSON.stringify({ offset }), "utf8").toString("base64url");
-}
-
-function decodeCursor(cursor: string | undefined): number {
-  if (cursor === undefined) return 0;
-  try {
-    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { offset?: unknown };
-    if (typeof parsed.offset === "number" && Number.isInteger(parsed.offset) && parsed.offset >= 0) {
-      return parsed.offset;
-    }
-  } catch {
-    // fall through to the validation error
-  }
-  throw new AppError("VALIDATION_FAILED", "Invalid cursor; pass the nextCursor from the previous run_results page.", {});
-}
 
 export function registerTools(server: McpServer, getApp: () => AppContainer): void {
   server.registerTool(

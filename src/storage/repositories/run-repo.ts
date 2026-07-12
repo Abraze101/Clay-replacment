@@ -78,6 +78,47 @@ export async function listRuns(db: Kysely<Database>, agencyId: string, limit = 5
     .execute();
 }
 
+export interface RunWithWorkflowRow {
+  id: string;
+  status: RunStatus;
+  pause_reason: PauseReason | null;
+  enrichment_profile: EnrichmentProfile;
+  credit_limit: string | number | null;
+  credits_used: string | number | null;
+  created_at: Date | string;
+  completed_at: Date | string | null;
+  workflow_slug: string;
+  workflow_name: string;
+}
+
+/** Recent runs with their workflow identity (Home screen listing). */
+export async function listRunsWithWorkflow(
+  db: Kysely<Database>,
+  agencyId: string,
+  limit = 50,
+): Promise<RunWithWorkflowRow[]> {
+  return await db
+    .selectFrom("runs")
+    .innerJoin("workflow_versions", "workflow_versions.id", "runs.workflow_version_id")
+    .innerJoin("workflows", "workflows.id", "workflow_versions.workflow_id")
+    .select([
+      "runs.id",
+      "runs.status",
+      "runs.pause_reason",
+      "runs.enrichment_profile",
+      "runs.credit_limit",
+      "runs.credits_used",
+      "runs.created_at",
+      "runs.completed_at",
+      "workflows.slug as workflow_slug",
+      "workflows.name as workflow_name",
+    ])
+    .where("runs.agency_id", "=", agencyId)
+    .orderBy("runs.created_at", "desc")
+    .limit(limit)
+    .execute();
+}
+
 /**
  * Single-driver invariant: claiming a run is one atomic conditional UPDATE.
  * A crashed process leaves a stale lease that a later claim (same statement,

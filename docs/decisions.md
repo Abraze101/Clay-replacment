@@ -156,12 +156,12 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 
 ## ADR-017: UI framework/stack
 
-- **Decision:** Not yet chosen.
-- **Date:** 2026-07-10
-- **Evidence:** Directive §17 defines UI scope but not the stack.
-- **Reason:** The stack choice depends on the M2 scope (small guided app, no node canvas, no spreadsheet engine) and is a user decision per `docs/claude-handoff.md`.
-- **Status:** pending (decide at M2 planning)
-- **Revisit trigger:** M2 planning session.
+- **Decision:** Vite + React SPA (hash-routed, no router/state/query libraries, hand-written CSS) over a thin JSON API on raw `node:http` in `src/web/`. API routes are 1:1 wrappers over the `src/app` services validating bodies with the engine's own Zod schemas; the SPA lives in top-level `web/` (own tsconfig, excluded from the node build) and type-checks against server DTOs through one type-only seam (`src/web/contracts.ts`). Single root package.json/lockfile; React/Vite are devDependencies only. Rejected: Hono+htmx (results-screen interactivity forces a rebuild by M5), SvelteKit (framework owns the server entry; dev reloads re-open PGlite), Next.js (fights the in-process engine singletons).
+- **Date:** 2026-07-11 (user decision at M2 planning)
+- **Evidence:** M2 scope is six small guided screens (no canvas/spreadsheet per `docs/ui-scope.md` guardrails); `src/mcp/http.ts` proves the raw-node:http pattern; one toolchain (TS 5.9/tsx/ESLint) per ADR-022. The web server co-hosts the engine because PGlite is single-connection and the in-process worker executes runs in the serving process — never run `pnpm web` and `pnpm mcp:http` against the same `pglite://` directory concurrently.
+- **Reason:** The framework never touches the engine process lifecycle (React/Vite stay in static-asset land), the JSON API is a third adapter peer to the CLI and MCP contract-testable with node:test, and the M6 hosted path is the same process plus auth and a PostgreSQL URL.
+- **Status:** accepted — implemented at M2 (2026-07-11) with react 19.2 / vite 8.1 (exact versions in pnpm-lock.yaml).
+- **Revisit trigger:** M6 hosted/authenticated UI (sessions, per-workspace credentials), or screen growth making hand-rolled routing/fetch a maintenance burden.
 
 ## ADR-018: Zod 4 for all runtime validation
 

@@ -4,7 +4,7 @@ A minimal usability UI is expected at Milestone 2, built over the fake provider 
 
 The UI is an adapter over the same application services as the CLI and MCP server. It duplicates no business logic, holds no run state, and never bypasses the engine's preview/approval gates. Milestone 2 acceptance: a nontechnical tester can define, preview, approve, run, monitor, review, and export a lead list without the CLI or an external LLM harness.
 
-A UI user should never need to understand MCP, JSON, workflow schemas, command-line tools, API field masks, provider-specific configuration, or model-provider internals. The UI framework is an open decision recorded in `docs/decisions.md`, chosen at Milestone 2 planning.
+A UI user should never need to understand MCP, JSON, workflow schemas, command-line tools, API field masks, provider-specific configuration, or model-provider internals. The UI stack is decided (ADR-017, 2026-07-11): a Vite + React SPA over a thin JSON API on raw `node:http` in `src/web/`, whose routes are 1:1 wrappers over the same application services the CLI and MCP server call. At M2 the provider-setup screen (§4) is reduced to a read-only connection-status panel on Home; the full setup screen lands with the first live provider at M3.
 
 ## 1. Home
 

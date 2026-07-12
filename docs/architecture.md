@@ -65,7 +65,8 @@ src/
   jobs/                      persistent background execution behind a JobQueue interface
   cli/                       commands and human-readable output
   mcp/                       model-neutral tools and transports
-  web/                       minimal guided UI (Milestone 2)
+  web/                       web JSON API adapter + static hosting (Milestone 2)
+web/                         Vite + React SPA client, built to web/dist and served by src/web
 ```
 
 ## Workflow definition

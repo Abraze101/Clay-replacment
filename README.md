@@ -39,4 +39,14 @@ Claude Code will automatically read [CLAUDE.md](CLAUDE.md), while Codex will rea
 
 ## Core architecture decision
 
-The headless workflow engine is foundational. Claude Code, Codex, and OpenAI-compatible harnesses are the first beta interfaces—not the required permanent interface—and call the engine through MCP tools. A minimal web UI is expected at Milestone 2 so a nontechnical user can run the whole loop without the CLI or an external LLM harness; it calls the same application services as the CLI and MCP server. The engine—not the chat, model, or UI—owns workflows, run state, dedupe, budgets, retries, and exports. The same product must cover local owner-operated businesses, regional SMBs, and larger companies across the United States by choosing different source and enrichment workflows.
+The headless workflow engine is foundational. Claude Code, Codex, and OpenAI-compatible harnesses are the first beta interfaces—not the required permanent interface—and call the engine through MCP tools. The Milestone 2 web UI lets a nontechnical user run the whole loop without the CLI or an external LLM harness; it calls the same application services as the CLI and MCP server. The engine—not the chat, model, or UI—owns workflows, run state, dedupe, budgets, retries, and exports. The same product must cover local owner-operated businesses, regional SMBs, and larger companies across the United States by choosing different source and enrichment workflows.
+
+## Web UI (Milestone 2)
+
+```sh
+pnpm install
+pnpm ui:build   # build the SPA into web/dist
+pnpm web        # serve UI + JSON API on http://localhost:3000 (applies migrations)
+```
+
+Development mode runs two terminals: `pnpm web` (API on `WEB_PORT`, default 3000) and `pnpm ui:dev` (Vite dev server proxying `/api`). Everything runs on the fake providers with embedded PGlite — no credentials, no credit spend. PGlite is single-connection: do not run `pnpm web` and `pnpm mcp:http` against the same `pglite://` directory at once; use a PostgreSQL `DATABASE_URL` to run both. Stack decision: ADR-017 in [docs/decisions.md](docs/decisions.md).

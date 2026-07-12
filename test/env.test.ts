@@ -21,6 +21,13 @@ test("env: rejects invalid numeric bounds", () => {
   assert.throws(() => parseEnv({ MAX_STEP_ATTEMPTS: "99" }), /MAX_STEP_ATTEMPTS/);
 });
 
+test("env: WEB_PORT defaults to 3000 and rejects out-of-range values", () => {
+  assert.equal(parseEnv({}).WEB_PORT, 3000);
+  assert.equal(parseEnv({ WEB_PORT: "8080" }).WEB_PORT, 8080);
+  assert.throws(() => parseEnv({ WEB_PORT: "0" }), /WEB_PORT/);
+  assert.throws(() => parseEnv({ WEB_PORT: "70000" }), /WEB_PORT/);
+});
+
 test("env: provider keys are optional in M0", () => {
   const env = parseEnv({});
   assert.equal(env.APOLLO_API_KEY, undefined);
