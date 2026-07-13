@@ -3,8 +3,9 @@
  *
  * Verifies the adapter's Zod schemas and field mapping against LIVE Apollo
  * responses and writes SANITIZED fixture drafts for human review. The default
- * action is ONE people-search page — credit-FREE (but rate-limited; a free
- * key works, with partially obfuscated last names). Enrichment is a separate,
+ * action is ONE people-search page — credit-FREE but PLAN-GATED: verified
+ * live 2026-07-12, Apollo 403s api_search entirely on free plans, so a paid
+ * plan (Basic+) is required even for this probe. Enrichment is a separate,
  * doubly-gated action because it consumes ~1 Apollo credit.
  *
  * Guardrails (CLAUDE.md: no credit-consuming call without explicit approval):
