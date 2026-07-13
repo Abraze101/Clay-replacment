@@ -6,10 +6,12 @@ import type {
   Database,
   EmailRole,
   EmailStatus,
+  IdentifierType,
   LeadsTable,
   LeadSourcesTable,
   PhoneRole,
 } from "../database-types.js";
+import { insertIdentityConflict } from "./identity-conflict-repo.js";
 import { toJson } from "./repo-util.js";
 
 export type LeadRow = Selectable<LeadsTable>;
@@ -36,6 +38,10 @@ export interface NewLead {
   sourceProviderId?: string | null;
   placeId?: string | null;
   timezone?: string | null;
+  /** M4 identity keys. verified_email is deliberately absent — no M4 writer. */
+  apolloPersonId?: string | null;
+  apolloOrganizationId?: string | null;
+  normalizedLinkedinUrl?: string | null;
 }
 
 /** Identity lookup #1: provider-neutral discovery identity (hard unique). */
@@ -84,6 +90,49 @@ export async function findLeadsByPhoneLocality(
   return await query.execute();
 }
 
+/** Person identity #1 (M4): Apollo's stable person id (hard unique). */
+export async function findLeadByApolloPersonId(
+  db: Kysely<Database>,
+  agencyId: string,
+  apolloPersonId: string,
+): Promise<LeadRow | undefined> {
+  return await db
+    .selectFrom("leads")
+    .selectAll()
+    .where("agency_id", "=", agencyId)
+    .where("apollo_person_id", "=", apolloPersonId)
+    .executeTakeFirst();
+}
+
+/** Person identity #2 (M4): canonical LinkedIn profile URL (hard unique; approved sources only). */
+export async function findLeadByLinkedinUrl(
+  db: Kysely<Database>,
+  agencyId: string,
+  normalizedLinkedinUrl: string,
+): Promise<LeadRow | undefined> {
+  return await db
+    .selectFrom("leads")
+    .selectAll()
+    .where("agency_id", "=", agencyId)
+    .where("normalized_linkedin_url", "=", normalizedLinkedinUrl)
+    .executeTakeFirst();
+}
+
+/** Business identity (M4): Apollo organization id — unique among kind='business' only. */
+export async function findLeadByApolloOrgId(
+  db: Kysely<Database>,
+  agencyId: string,
+  apolloOrganizationId: string,
+): Promise<LeadRow | undefined> {
+  return await db
+    .selectFrom("leads")
+    .selectAll()
+    .where("agency_id", "=", agencyId)
+    .where("apollo_organization_id", "=", apolloOrganizationId)
+    .where("kind", "=", "business")
+    .executeTakeFirst();
+}
+
 /**
  * Insert a lead; a replayed source/dedupe step hitting the source-identity
  * unique upserts (DO NOTHING + re-select) instead of duplicating.
@@ -111,18 +160,108 @@ export async function insertLead(db: Kysely<Database>, lead: NewLead): Promise<L
       source_provider_id: lead.sourceProviderId ?? null,
       place_id: lead.placeId ?? null,
       timezone: lead.timezone ?? null,
+      apollo_person_id: lead.apolloPersonId ?? null,
+      apollo_organization_id: lead.apolloOrganizationId ?? null,
+      normalized_linkedin_url: lead.normalizedLinkedinUrl ?? null,
       metadata: toJson({}),
     })
     .onConflict((oc) => oc.doNothing())
     .returningAll()
     .executeTakeFirst();
   if (inserted) return inserted;
-  const existing =
+  // The DO NOTHING may have hit any hard-identity unique; try each key the
+  // candidate carries, in identity-ladder order.
+  const bySource =
     lead.sourceProvider && lead.sourceProviderId
       ? await findLeadBySourceIdentity(db, lead.agencyId, lead.sourceProvider, lead.sourceProviderId)
       : undefined;
-  if (!existing) throw new Error("insertLead conflict without resolvable source identity");
-  return existing;
+  if (bySource) return bySource;
+  const byApolloPerson = lead.apolloPersonId
+    ? await findLeadByApolloPersonId(db, lead.agencyId, lead.apolloPersonId)
+    : undefined;
+  if (byApolloPerson) return byApolloPerson;
+  const byLinkedin = lead.normalizedLinkedinUrl
+    ? await findLeadByLinkedinUrl(db, lead.agencyId, lead.normalizedLinkedinUrl)
+    : undefined;
+  if (byLinkedin) return byLinkedin;
+  const byOrg =
+    lead.kind === "business" && lead.apolloOrganizationId
+      ? await findLeadByApolloOrgId(db, lead.agencyId, lead.apolloOrganizationId)
+      : undefined;
+  if (byOrg) return byOrg;
+  throw new Error("insertLead conflict without resolvable identity key");
+}
+
+export interface LeadIdentityKeys {
+  apolloPersonId?: string | null;
+  apolloOrganizationId?: string | null;
+  normalizedLinkedinUrl?: string | null;
+}
+
+/**
+ * Conflict-safe identity backfill (M4): set a hard identity key on a lead
+ * only when no other lead already holds it; a held key becomes an
+ * identity_conflicts row and the column stays NULL (flag, never merge). An
+ * existing DIFFERENT value on the lead itself is kept unchanged — provider
+ * drift on one lead is not a two-lead conflict. Select-then-update is
+ * driver-portable; the run lease serializes writers, and a cross-run race
+ * surfaces as a unique violation that retries into this conflict path.
+ */
+export async function setLeadIdentityKeys(
+  db: Kysely<Database>,
+  args: { leadId: string; agencyId: string; runId?: string | null; keys: LeadIdentityKeys },
+): Promise<{ conflicts: IdentifierType[] }> {
+  const lead = await getLead(db, args.leadId);
+  if (!lead) throw new Error(`setLeadIdentityKeys: lead ${args.leadId} not found`);
+  const conflicts: IdentifierType[] = [];
+  const updates: Partial<Record<"apollo_person_id" | "apollo_organization_id" | "normalized_linkedin_url", string>> = {};
+
+  const consider = async (
+    column: "apollo_person_id" | "apollo_organization_id" | "normalized_linkedin_url",
+    identifierType: IdentifierType,
+    value: string | null | undefined,
+    findHolder: (() => Promise<LeadRow | undefined>) | null,
+  ) => {
+    if (!value) return;
+    if (lead[column] !== null) return; // keep the existing value, same or different
+    const holder = findHolder ? await findHolder() : undefined;
+    if (holder && holder.id !== args.leadId) {
+      conflicts.push(identifierType);
+      await insertIdentityConflict(db, {
+        leadIdA: holder.id,
+        leadIdB: args.leadId,
+        identifierType,
+        identifierValue: value,
+        runId: args.runId ?? null,
+      });
+      return;
+    }
+    updates[column] = value;
+  };
+
+  await consider("apollo_person_id", "apollo_person_id", args.keys.apolloPersonId, () =>
+    findLeadByApolloPersonId(db, args.agencyId, args.keys.apolloPersonId!),
+  );
+  await consider("normalized_linkedin_url", "normalized_linkedin_url", args.keys.normalizedLinkedinUrl, () =>
+    findLeadByLinkedinUrl(db, args.agencyId, args.keys.normalizedLinkedinUrl!),
+  );
+  // The org key is an identity only for business leads; on a person lead it is
+  // a non-unique employer reference and needs no holder check.
+  await consider(
+    "apollo_organization_id",
+    "apollo_organization_id",
+    args.keys.apolloOrganizationId,
+    lead.kind === "business" ? () => findLeadByApolloOrgId(db, args.agencyId, args.keys.apolloOrganizationId!) : null,
+  );
+
+  if (Object.keys(updates).length > 0) {
+    await db
+      .updateTable("leads")
+      .set({ ...updates, updated_at: new Date() })
+      .where("id", "=", args.leadId)
+      .execute();
+  }
+  return { conflicts };
 }
 
 export async function getLead(db: Kysely<Database>, leadId: string): Promise<LeadRow | undefined> {

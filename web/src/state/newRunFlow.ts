@@ -21,6 +21,8 @@ export interface NewRunFields {
   cap: string;
   /** Empty string = estimated cost. */
   budget: string;
+  /** Pasted CSV text for imported-list workflows; empty = not an import run. */
+  importCsv: string;
 }
 
 export interface RunRequestOptions {
@@ -29,6 +31,7 @@ export interface RunRequestOptions {
   overrides?: CapabilityOverrides;
   cap?: number;
   budget?: number;
+  importCsv?: string;
 }
 
 export const INITIAL_FIELDS: NewRunFields = {
@@ -41,6 +44,7 @@ export const INITIAL_FIELDS: NewRunFields = {
   overrides: {},
   cap: "",
   budget: "",
+  importCsv: "",
 };
 
 /** Compile the editable fields into the exact options object sent to preview AND start. */
@@ -62,6 +66,8 @@ export function toRunOptions(fields: NewRunFields): RunRequestOptions {
     ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
     ...(fields.cap.trim().length > 0 && Number.isInteger(cap) ? { cap } : {}),
     ...(fields.budget.trim().length > 0 && Number.isFinite(budget) ? { budget } : {}),
+    // Sent verbatim on preview AND start: the approval binds the row content.
+    ...(fields.importCsv.trim().length > 0 ? { importCsv: fields.importCsv } : {}),
   };
 }
 

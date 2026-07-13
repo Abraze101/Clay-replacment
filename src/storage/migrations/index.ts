@@ -2,6 +2,7 @@ import { sha256Hex } from "../../shared/checksum.js";
 import { MIGRATION_0001_INIT } from "./0001-init.js";
 import { MIGRATION_0002_M1 } from "./0002-m1.js";
 import { MIGRATION_0003_M3 } from "./0003-m3.js";
+import { MIGRATION_0004_M4 } from "./0004-m4.js";
 
 export interface Migration {
   id: string;
@@ -22,4 +23,5 @@ export const MIGRATIONS: readonly Migration[] = [
   define("0001_init", MIGRATION_0001_INIT),
   define("0002_m1", MIGRATION_0002_M1),
   define("0003_m3", MIGRATION_0003_M3),
+  define("0004_m4", MIGRATION_0004_M4),
 ];

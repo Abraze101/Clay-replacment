@@ -110,6 +110,21 @@ export interface LeadsTable {
   place_id: string | null;
   /** IANA timezone id (0003_m3); NULL means unknown, never guessed. */
   timezone: string | null;
+  /** Apollo person id (0004_m4); person identity #1, agency-scoped unique. */
+  apollo_person_id: string | null;
+  /** Apollo organization id (0004_m4); unique only for kind='business'. */
+  apollo_organization_id: string | null;
+  /**
+   * Canonical 'linkedin.com/in/<slug>' (0004_m4); person identity #2. The URL
+   * comes from Apollo or an import ONLY — never scraped (permanent guardrail).
+   */
+  normalized_linkedin_url: string | null;
+  /**
+   * Person identity #3 (0004_m4). Set ONLY when a deliverability check returns
+   * 'valid' — there is NO M4 writer; an email a provider merely found lives on
+   * contact_points with email_status='not_checked'.
+   */
+  verified_email: string | null;
   metadata: JsonColumn<JsonObject>;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
@@ -372,6 +387,36 @@ export interface ExportsTable {
   completed_at: TimestampColumn | null;
 }
 
+export type IdentifierType =
+  | "source_provider_id"
+  | "apollo_person_id"
+  | "apollo_organization_id"
+  | "normalized_linkedin_url"
+  | "verified_email"
+  | "place_id"
+  | "normalized_domain"
+  | "normalized_phone_locality";
+export type ConflictStatus = "open" | "resolved_merged" | "resolved_distinct";
+
+/**
+ * Durable "flag, do not merge automatically" record (0004_m4). The pair is
+ * canonicalized (lead_id_a < lead_id_b) and UNIQUE with the identifier, so a
+ * retried dedupe/enrich step re-raises the same conflict as a no-op. M4 only
+ * writes 'open' rows; resolution tooling is a later milestone.
+ */
+export interface IdentityConflictsTable {
+  id: Generated<string>;
+  lead_id_a: string;
+  lead_id_b: string;
+  identifier_type: IdentifierType;
+  identifier_value: string;
+  run_id: string | null;
+  detected_at: GeneratedTimestamp;
+  status: WithDefault<ConflictStatus>;
+  resolved_by: string | null;
+  resolved_at: TimestampColumn | null;
+}
+
 export interface SchemaMigrationsTable {
   id: string;
   checksum: string;
@@ -394,6 +439,7 @@ export interface Database {
   contact_point_checks: ContactPointChecksTable;
   generated_outputs: GeneratedOutputsTable;
   exports: ExportsTable;
+  identity_conflicts: IdentityConflictsTable;
   schema_migrations: SchemaMigrationsTable;
 }
 

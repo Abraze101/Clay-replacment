@@ -46,6 +46,8 @@ export async function executeSourceStep(
     businessType: plan.inputs.businessType,
     locations: plan.inputs.locations,
     limit: plan.sourceLimit,
+    personTitles: plan.inputs.personTitles,
+    importRows: plan.inputs.importRows,
   };
 
   if (!isPagedPaidSource(provider)) {

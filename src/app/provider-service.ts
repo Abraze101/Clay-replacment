@@ -1,4 +1,5 @@
 import { AppError } from "../shared/errors.js";
+import { ApolloClient } from "../providers/apollo/client.js";
 import { FirecrawlClient } from "../providers/firecrawl/client.js";
 import { SerpApiClient } from "../providers/serpapi/client.js";
 import type { AppContainer } from "./container.js";
@@ -106,6 +107,20 @@ export async function testProviderConnection(app: AppContainer, name: string): P
       detail:
         usage.remainingCredits === null ? "Connected." : `Connected; ${usage.remainingCredits} Firecrawl credits left.`,
     };
+  }
+  if (name === "professional-contacts" || name === "person-enrichment") {
+    if (!app.env.APOLLO_API_KEY) {
+      return { name, ok: false, detail: "Not configured: set APOLLO_API_KEY (a master API key) in the server environment." };
+    }
+    const client = new ApolloClient({
+      apiKey: app.env.APOLLO_API_KEY,
+      baseUrl: app.env.APOLLO_BASE_URL,
+      maxRequestsPerMinute: app.env.APOLLO_MAX_RPM,
+    });
+    const health = await client.healthCheck();
+    return health.ok
+      ? { name, ok: true, detail: "Connected (zero-cost key check passed)." }
+      : { name, ok: false, detail: "Apollo answered but the key is not logged in; check that it is a master API key." };
   }
   throw new AppError("NOT_FOUND", `Provider '${name}' has no connection test.`, { name });
 }

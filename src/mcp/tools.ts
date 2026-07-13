@@ -22,6 +22,7 @@ import {
   startRun,
   type RunOptions,
 } from "../app/run-service.js";
+import { loadTemplateDefinition, templateIds } from "../app/template-service.js";
 import { overridesSchema } from "../engine/workflow-schema/overrides.js";
 import { profileSchema } from "../engine/workflow-schema/steps.js";
 import { AppError, isAppError } from "../shared/errors.js";
@@ -133,11 +134,18 @@ const runOptionsShape = {
   inputs: z
     .record(z.string(), z.unknown())
     .optional()
-    .describe("Run inputs merged over the workflow's defaults (e.g. businessType, locations, limit)."),
+    .describe("Run inputs merged over the workflow's defaults (e.g. businessType, locations, limit, personTitles)."),
   profile: profileSchema.optional().describe("Enrichment profile: quick_list, call_ready, or full."),
   overrides: overridesSchema.optional().describe("Typed per-capability overrides; bound into the approval scope."),
   cap: z.number().int().min(0).max(100).optional().describe("Paid record cap (hard maximum 100 per run)."),
   budget: z.number().min(0).optional().describe("Credit limit for paid steps; the run pauses when it is reached."),
+  importCsv: z
+    .string()
+    .max(524_288)
+    .optional()
+    .describe(
+      "Raw CSV text for imported-list workflows (≤512 KiB, ≤500 rows; recognized headers: company/name, website/domain, phone, email, linkedin, first/last/contact name, title, address, city, state, country). Pass the SAME text to run_preview and run_start — the approval binds the row content. Structured callers may pass inputs.importRows instead (never both).",
+    ),
 };
 
 function toRunOptions(args: {
@@ -146,6 +154,7 @@ function toRunOptions(args: {
   overrides?: Record<string, unknown>;
   cap?: number;
   budget?: number;
+  importCsv?: string;
 }): RunOptions {
   return {
     inputs: args.inputs,
@@ -153,6 +162,7 @@ function toRunOptions(args: {
     overrides: args.overrides,
     cap: args.cap,
     budget: args.budget,
+    importCsv: args.importCsv,
   };
 }
 
@@ -167,14 +177,26 @@ export function registerTools(server: McpServer, getApp: () => AppContainer): vo
     {
       title: "Create a workflow",
       description:
-        "Validate a typed workflow definition (10-step allowlist; no arbitrary code) and persist it with immutable version 1.",
-      inputSchema: { definition: workflowDefinitionField },
+        "Validate a typed workflow definition (10-step allowlist; no arbitrary code) and persist it with immutable version 1. Instead of a definition, pass `template` to seed a built-in template: local-service-demo, local-business-quick-list, professional-executive, or imported-list-enrich.",
+      inputSchema: {
+        definition: workflowDefinitionField.optional(),
+        template: z
+          .string()
+          .optional()
+          .describe("Built-in template id to seed (XOR with definition)."),
+      },
       outputSchema: envelopeShape,
       annotations: mutating,
     },
-    async ({ definition }) =>
+    async ({ definition, template }) =>
       await respond(async () => {
-        const created = await createWorkflowFromDefinition(getApp(), definition);
+        if ((definition === undefined) === (template === undefined)) {
+          throw new AppError("VALIDATION_FAILED", "Pass exactly one of 'definition' or 'template'.", {
+            templates: templateIds(),
+          });
+        }
+        const raw = definition ?? (await loadTemplateDefinition(template!));
+        const created = await createWorkflowFromDefinition(getApp(), raw);
         return {
           data: created,
           summary: `Workflow '${created.slug}' created at version ${created.version}.`,

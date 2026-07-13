@@ -1,0 +1,9 @@
+Company Name,Website,Phone,Email,LinkedIn,First Name,Last Name,Title,City,State,Country
+Acme Roof Sample Co,https://acmeroof.example,+1 512-555-0101,owner@acmeroof.example,https://www.linkedin.com/in/sanitized-owner-one,Pat,Sample,Owner,Austin,TX,US
+Fictional Plumbing LLC,fictionalplumbing.example,(512) 555-0102,,,Sam,Placeholder,President,Round Rock,TX,US
+Sample Gym Group,https://samplegym.example,512-555-0103,frontdesk@samplegym.example,,,,,"Dallas",TX,US
+Placeholder HVAC,https://placeholderhvac.example,+1 512 555 0104,,https://linkedin.com/in/sanitized-hvac-owner,Lee,Fictional,CEO,Austin,TX,US
+No Website Clinic,,512-555-0105,clinic@nowebsite.example,,,,Office Manager,Pflugerville,TX,US
+Domain Only Co,domainonly.example,,,,,,,,,
+Email Only Consulting,,,solo@emailonly.example,,,,Principal,,,
+Sample Med Spa,https://samplemedspa.example,512-555-0106,hello@samplemedspa.example,,Alex,Sample,Owner,Cedar Park,TX,US

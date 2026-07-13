@@ -1,0 +1,21 @@
+{
+  "person": {
+    "id": "sanitized-person-0001",
+    "first_name": "Jane",
+    "last_name": "Sample",
+    "name": "Jane Sample",
+    "title": "Chief Executive Officer",
+    "linkedin_url": "https://www.linkedin.com/in/sanitized-jane-sample",
+    "email": "jane.sample@acmehealth.example",
+    "email_status": "verified",
+    "city": "Austin",
+    "state": "Texas",
+    "country": "United States",
+    "organization": {
+      "id": "sanitized-org-0001",
+      "name": "Acme Health Sample Co",
+      "website_url": "https://acmehealth.example",
+      "primary_domain": "acmehealth.example"
+    }
+  }
+}

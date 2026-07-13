@@ -29,6 +29,8 @@ interface Ledger {
 export class FakeEnrichProvider implements EnrichProvider {
   readonly name = "fake-apollo";
   readonly costPerRecord = 1;
+  /** The persisted ledger dedupes on requestKey — a crash replay provably cannot double-charge. */
+  readonly idempotentReplay = true;
 
   constructor(private readonly ledgerPath: string) {}
 

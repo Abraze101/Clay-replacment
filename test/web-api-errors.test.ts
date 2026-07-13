@@ -127,12 +127,28 @@ test("web api: provider status exposes connection booleans and never the key val
     assert.equal(res.status, 200);
     const providers = res.body.data?.providers;
     assert.ok(providers);
-    // M3: the three fakes (registered) plus the live-provider catalog, which
-    // surfaces unconfigured providers as connected:false.
+    // M4: the three fakes + the always-on imported-list source (registered)
+    // plus the live-provider catalog, which surfaces unconfigured providers
+    // as connected:false.
     assert.deepEqual(
       providers.map((p) => p.name).sort(),
-      ["fake-apollo", "fake-places", "fake-website", "local-business", "website-research"],
+      [
+        "fake-apollo",
+        "fake-places",
+        "fake-website",
+        "imported-list",
+        "local-business",
+        "person-enrichment",
+        "professional-contacts",
+        "website-research",
+      ],
     );
+    assert.equal(providers.find((p) => p.name === "imported-list")?.connected, true, "credential-less, always on");
+    for (const apolloName of ["professional-contacts", "person-enrichment"]) {
+      const apolloEntry: ProviderStatusInfo | undefined = providers.find((p) => p.name === apolloName);
+      assert.equal(apolloEntry?.connected, false);
+      assert.equal(apolloEntry?.requiresEnv, "APOLLO_API_KEY");
+    }
     for (const provider of providers.filter((p) => p.name.startsWith("fake-"))) {
       assert.equal(provider.connected, true);
     }

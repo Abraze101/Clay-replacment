@@ -22,6 +22,7 @@ export type {
   RunListItem,
   RunStatusSummary,
   StartRunResponse,
+  TemplateSummary,
   WebExportResult,
   WorkflowCreateResponse,
   WorkflowSummary,

@@ -1,0 +1,20 @@
+{
+  "id": "imported-list-enrich",
+  "version": 1,
+  "name": "Imported list: normalize, dedupe, enrich",
+  "description": "M4 Workflow 3: import a CSV of companies/contacts (CLI --import-csv, UI paste, or MCP importCsv), normalize domains and phones, dedupe against existing leads, optionally research websites and enrich decision-makers for call_ready/full profiles, score completeness, review, export. quick_list cleans and dedupes the list at zero cost.",
+  "inputs": {
+    "limit": 100,
+    "enrichmentProfile": "quick_list"
+  },
+  "steps": [
+    { "id": "import", "type": "source", "provider": "imported-list" },
+    { "id": "normalize", "type": "normalize" },
+    { "id": "dedupe", "type": "dedupe" },
+    { "id": "research", "type": "research", "provider": "website-research", "profiles": ["full"] },
+    { "id": "owner", "type": "enrich", "provider": "person-enrichment", "optional": true, "profiles": ["call_ready", "full"] },
+    { "id": "fit", "type": "score", "template": "imported-list" },
+    { "id": "review", "type": "review_gate" },
+    { "id": "export", "type": "export", "format": "csv" }
+  ]
+}

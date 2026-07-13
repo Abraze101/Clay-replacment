@@ -33,8 +33,15 @@ const envSchema = z.object({
   FIRECRAWL_API_KEY: z.string().optional(),
   FIRECRAWL_BASE_URL: z.string().url().default("https://api.firecrawl.dev"),
   WEBSITE_RESEARCH_PROVIDER: z.enum(["fake", "firecrawl"]).default("fake"),
-  // Provider keys are optional (never used until their milestone; fake providers otherwise).
+  // Apollo (M4 professional workflows, ADR-014/ADR-028). A MASTER API key.
   APOLLO_API_KEY: z.string().optional(),
+  APOLLO_BASE_URL: z.string().url().default("https://api.apollo.io"),
+  // Free-tier Apollo allows 50 req/min; default well under it.
+  APOLLO_MAX_RPM: z.coerce.number().int().min(1).max(240).default(30),
+  // People search pages per query (100 hits/page; inputs.limit ≤ 500).
+  APOLLO_MAX_PAGES_PER_QUERY: z.coerce.number().int().min(1).max(5).default(5),
+  APOLLO_DEFAULT_RETRY_AFTER_SECONDS: z.coerce.number().int().min(1).max(86400).default(60),
+  // Provider keys are optional (never used until their milestone; fake providers otherwise).
   GOOGLE_PLACES_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),

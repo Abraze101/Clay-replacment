@@ -40,6 +40,7 @@ export interface ApiFailure {
 export type ApiEnvelope<T> = ApiSuccess<T> | ApiFailure;
 
 export type { ProviderStatusEntry as ProviderStatusInfo, ProviderTestResult } from "../app/provider-service.js";
+export type { TemplateSummary } from "../app/template-service.js";
 
 export interface WorkflowCreateResponse {
   workflowId: string;
@@ -92,6 +93,8 @@ export const runOptionsBodySchema = z
     overrides: overridesSchema.optional(),
     cap: z.number().int().min(0).max(100).optional(),
     budget: z.number().min(0).optional(),
+    /** Raw CSV text for imported-list workflows (≤512 KiB, ≤500 rows); fits the 1 MiB body cap. */
+    importCsv: z.string().max(524_288).optional(),
   })
   .strict();
 
@@ -115,7 +118,16 @@ export const reviewBodySchema = z
 
 export const createWorkflowBodySchema = z.union([
   z.object({ definition: z.record(z.string(), z.unknown()) }).strict(),
-  z.object({ template: z.enum(["local-service-demo", "local-business-quick-list"]) }).strict(),
+  z
+    .object({
+      template: z.enum([
+        "local-service-demo",
+        "local-business-quick-list",
+        "professional-executive",
+        "imported-list-enrich",
+      ]),
+    })
+    .strict(),
 ]);
 
 export const exportBodySchema = z.object({ force: z.boolean().optional() }).strict();

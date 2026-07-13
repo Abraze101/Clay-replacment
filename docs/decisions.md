@@ -44,7 +44,7 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Date:** 2026-07-10
 - **Evidence:** Directive §13 ("Corrections to the research report" — json-rules-engine deferral); operator grammar specified in `docs/proposals/build-vs-adopt.md` §2 ("Deferred from adopt now") and `docs/proposals/milestone-0-plan.md` (workflow-schema file plan).
 - **Reason:** Deterministic, auditable qualification with a minimal attack/complexity surface; replaces the deferred rules engine.
-- **Status:** accepted
+- **Status:** accepted — extended at M4 (2026-07-12): `RULE_FIELDS` gained six person/contact fields (`title`, `employer_name`, `has_linkedin`, `has_email`, `has_verified_email`, `has_direct_phone` — all deterministic from the persisted snapshot; `has_verified_email` stays false until a real M5 deliverability check writes it), and `ScoreRule.when` upgraded from a bare AND list to the SAME all/any RuleGroup the filter step already used (OR-matching over titles). Still the typed allowlist; the rules engine stays deferred.
 - **Revisit trigger:** Same as ADR-003 — real workflow complexity justifying a general rules engine.
 
 ## ADR-005: PGlite locally, PostgreSQL hosted
@@ -134,7 +134,7 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Date:** 2026-07-10
 - **Evidence:** Directive §14.
 - **Reason:** Best-fit coverage for company/employment-represented contacts. Apollo standard plans cannot be assumed to permit data resale or powering an external customer product; a managed-credit model requires an appropriate agreement first.
-- **Status:** accepted
+- **Status:** accepted — implemented at M4 (2026-07-12); the verified endpoint scope, plan-tier finding (Basic minimum), and paid-call contract are ADR-028.
 - **Revisit trigger:** Managed-credit design (resale/terms review), or Apollo coverage/terms degradation.
 
 ## ADR-015: Two delivery models, one codebase
@@ -179,7 +179,7 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Date:** 2026-07-10
 - **Evidence:** Directive §13 (M0 dependency direction); `docs/proposals/build-vs-adopt.md` §2 — streaming, `columns` whitelist, `bom`, `escape_formulas` CSV-injection defense.
 - **Reason:** Deletes hand-written quoting/escaping/streaming code while keeping the export-safety controls (formula escaping, column whitelist) declarative.
-- **Status:** accepted (csv-parse lands M4)
+- **Status:** accepted — implemented (csv-parse 7.0.1 pinned exact landed at M4, 2026-07-12: sync parse over bounded ≤512 KiB inline text — streaming is unnecessary under that ceiling — with `bom`, `trim`, `relax_column_count:false`, a case-insensitive header-alias allowlist that hard-fails on unknown columns, and Zod per-row validation in `src/engine/import/csv-import.ts`; no revisit-trigger regressions found).
 - **Revisit trigger:** csv-parse v7 is a fresh major — regressions found during the M4 imported-list workflow.
 
 ## ADR-020: libphonenumber-js/max for phone normalization
@@ -257,3 +257,13 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Reason:** One vendor already under contract covers the research need without building the ADR-013 lean fetcher now; module isolation keeps the recorded alternatives (an ADR-013-style self-built fetcher, or deferring research to M4) a registry/env change only.
 - **Status:** accepted (module optional/deferrable by env)
 - **Revisit trigger:** Credit costs at real volumes making the free ADR-013 lean fetcher worth building, or Firecrawl reliability problems on ordinary business sites.
+
+## ADR-028: Apollo typed REST adapter — endpoint scope and paid-call contract
+
+- **Decision:** Implement Apollo (ADR-014) as a plain typed `fetch` + Zod client (`src/providers/apollo/client.ts`, per ADR-025) wrapping exactly two data endpoints, registered under provider-neutral names: **people search** `POST /api/v1/mixed_people/api_search` as the zero-cost `PagedPaidSource` `professional-contacts` (ledgered for crash replay and 429 → `resume_at` pausing), and **person enrichment** `POST /api/v1/people/match` as the `EnrichProvider` `person-enrichment` (`costPerRecord: 1`, `idempotentReplay: false`). The legacy `/mixed_people/search` endpoint is NEVER called (it returns 403 on Basic plans). `reveal_personal_emails` is always false (B2B work email only); `reveal_phone_number` is never sent — Apollo delivers phone reveals asynchronously to a mandatory HTTPS webhook, so phone discovery is deferred to M5 where contact enrichment and call-readiness live. Zero-cost key check: `GET /api/v1/auth/health`. No sequences, emails, contact-creation, or CRM writes are wrapped, ever (prohibited-action guardrail). One shared client instance serves both roles so the serial limiter (ADR-026) spans Apollo's account-wide per-minute window.
+- **Date:** 2026-07-12
+- **Evidence:** Verified against docs.apollo.io on 2026-07-12 (people-api-search, people-enrichment, api-pricing, auth health) plus 2026 hands-on guides: search requires a **master API key**, consumes no credits, and returns no emails/phones (free plans obfuscate last names); enrichment consumes ~1 credit per record when data is returned; the `api_search`-vs-legacy 403 distinction is undocumented by Apollo but reproduced by multiple integrators. **Plan tier:** every plan has at least basic API access; **Basic (~$49/user/mo annual) is the minimum practical tier** for this adapter's scope (Free: ~50 req/min, 600/day — enough to validate the search adapter via `pnpm probe:apollo` before purchasing). Credit allowances shifted repeatedly in 2026 — confirm at checkout. Standard terms prohibit resale/powering external products (ADR-014's managed-credit caveat stands).
+- **Paid-call idempotency contract** (per docs/architecture.md; mirrored in the client docblock): neither endpoint accepts an idempotency key or returns a stable request id (the engine's `request_key` is persisted as the fallback). *Search:* failures never consume credits, so network errors, 5xx, timeouts, AND malformed 200s are all `RetryableProviderError{charged:false}` (deliberate divergence from paid clients); 429 → `RateLimitError` (daily-window bodies wait ≥ 1h). *Match:* clean 4xx/5xx and `no_match` don't charge; timeout or malformed 200 → `AmbiguousOutcomeError(possibleCost=1)` → `needs_review` with NO automatic reconciliation (Apollo has no per-request ledger API — reconcile manually against the dashboard); crash replay of an interrupted paid attempt is likewise booked ambiguous (`idempotentReplay:false`), never re-executed; 401/402/403/422 → operator-facing `PROVIDER_ERROR`.
+- **Reason:** Search being credit-free and contact-less makes the professional workflow's "review real rows before any spend" gate structurally cheap; the two-endpoint scope keeps the guardrail surface (no outbound actions) auditable; owning the HTTP layer keeps the charged/uncharged/ambiguous taxonomy explicit and fixture-testable.
+- **Status:** accepted
+- **Revisit trigger:** Apollo pricing/tier gating changes (they shifted repeatedly in 2026), the M5 phone-reveal webhook design, managed-credit/resale design (ADR-014), or Apollo publishing request ids/idempotency keys that would let ambiguous outcomes reconcile automatically.

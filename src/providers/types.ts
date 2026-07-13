@@ -4,10 +4,25 @@
  * M0 registers only fake implementations.
  */
 
+/** Structured person hit from a professional-contact search (M4/Apollo). */
+export interface SourcePersonFields {
+  firstName?: string;
+  lastName?: string;
+  apolloPersonId?: string;
+  employer?: {
+    name?: string;
+    websiteUrl?: string;
+    domain?: string;
+    apolloOrganizationId?: string;
+  };
+}
+
 export interface SourceRecord {
   /** Stable provider-scoped identifier (survives pagination and re-fetch). */
   sourceKey: string;
   name: string;
+  /** Lead kind this record becomes; defaults to "business". */
+  kind?: "business" | "person";
   category?: string;
   address?: string;
   locality?: string;
@@ -19,17 +34,53 @@ export interface SourceRecord {
   reviewCount?: number;
   /** Per-record provenance URL (e.g. the Maps listing); stored on lead_sources. */
   sourceUrl?: string;
+  /**
+   * M4 contact/person extensions. Only IMPORTED rows may carry an email —
+   * search providers never fabricate contact data (Apollo search returns none).
+   * A linkedinUrl comes from an approved source only (Apollo or import).
+   */
+  email?: string;
+  linkedinUrl?: string;
+  /** Unstructured contact name from an imported row. */
+  contactName?: string;
+  title?: string;
+  person?: SourcePersonFields;
+}
+
+/**
+ * One imported-list row after engine-side validation (bounded, typed). The
+ * Zod schema lives in src/engine/import/csv-import.ts; this is the neutral
+ * shape carried through SourceQuery/workflow inputs.
+ */
+export interface ImportRow {
+  name?: string;
+  website?: string;
+  phone?: string;
+  email?: string;
+  linkedinUrl?: string;
+  contactName?: string;
+  title?: string;
+  address?: string;
+  locality?: string;
+  region?: string;
+  country?: string;
 }
 
 export interface SourceQuery {
   businessType?: string;
   locations?: string[];
   limit: number;
+  /** Professional-contact searches (M4): job titles to match. */
+  personTitles?: string[];
+  /** Imported-list runs (M4): validated rows from the run inputs. */
+  importRows?: ImportRow[];
 }
 
 /** Free discovery of candidate businesses/people. */
 export interface SourceProvider {
   readonly name: string;
+  /** Optional pre-run input validation (e.g. imported-list requires rows). Throws AppError VALIDATION_FAILED. */
+  validateQuery?(query: SourceQuery): void;
   search(query: SourceQuery): Promise<{ records: SourceRecord[]; requestId: string; coverageNote?: string }>;
 }
 
@@ -79,6 +130,15 @@ export interface EnrichRequest {
   normalizedDomain?: string | null;
   normalizedPhone?: string | null;
   locality?: string | null;
+  /** M4 person-lead extensions; a person-aware enricher prefers stable ids over name matching. */
+  kind?: "business" | "person";
+  firstName?: string | null;
+  lastName?: string | null;
+  title?: string | null;
+  apolloPersonId?: string | null;
+  normalizedLinkedinUrl?: string | null;
+  employerName?: string | null;
+  employerDomain?: string | null;
 }
 
 export interface EnrichPerson {
@@ -87,6 +147,16 @@ export interface EnrichPerson {
   title: string;
   directPhone?: string;
   workEmail?: string;
+  /** M4 identity backfill: stable ids the match revealed (approved sources only). */
+  apolloPersonId?: string;
+  apolloOrganizationId?: string;
+  linkedinUrl?: string;
+  /**
+   * The provider's OWN claim about the email's status (e.g. Apollo
+   * email_status). Stored as data on the contact point, never as our
+   * verification judgment — the engine keeps email_status='not_checked'.
+   */
+  emailStatusClaim?: string;
 }
 
 export type EnrichOutcome =
@@ -101,6 +171,14 @@ export type EnrichOutcome =
 export interface EnrichProvider {
   readonly name: string;
   readonly costPerRecord: number;
+  /**
+   * True when replaying a stored requestKey provably cannot double-charge
+   * (the fake provider's persisted ledger). Adapters without provider-side
+   * idempotency (Apollo) set false: the runner books a crash-replay of an
+   * interrupted paid attempt as ambiguous → needs_review instead of
+   * re-calling the provider.
+   */
+  readonly idempotentReplay?: boolean;
   enrich(request: EnrichRequest): Promise<EnrichOutcome>;
 }
 

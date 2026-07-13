@@ -24,6 +24,7 @@ test("identity: source-provider identity is the hard match; weak identifiers res
     assert.deepEqual(
       await resolveIdentity(kysely, {
         agencyId: t.app.agencyId,
+        kind: "business",
         sourceProvider: "fake-places",
         sourceProviderId: "fx-001",
         displayName: "Totally Different Name",
@@ -38,6 +39,7 @@ test("identity: source-provider identity is the hard match; weak identifiers res
     assert.deepEqual(
       await resolveIdentity(kysely, {
         agencyId: t.app.agencyId,
+        kind: "business",
         sourceProvider: "fake-places",
         sourceProviderId: "fx-999",
         displayName: "  AUSTIN Roof Pros ",
@@ -51,6 +53,7 @@ test("identity: source-provider identity is the hard match; weak identifiers res
     // 3. Same domain + DIFFERENT name → conflict (multi-location sites share domains).
     const domainConflict = await resolveIdentity(kysely, {
       agencyId: t.app.agencyId,
+      kind: "business",
       sourceProvider: "fake-places",
       sourceProviderId: "fx-998",
       displayName: "Round Rock Plumbing Group",
@@ -64,6 +67,7 @@ test("identity: source-provider identity is the hard match; weak identifiers res
     // 4. Same phone + locality + different name → conflict (shared line), never merged.
     const phoneConflict = await resolveIdentity(kysely, {
       agencyId: t.app.agencyId,
+      kind: "business",
       sourceProvider: "fake-places",
       sourceProviderId: "fx-997",
       displayName: "Lakeside Fitness Studio",
@@ -77,6 +81,7 @@ test("identity: source-provider identity is the hard match; weak identifiers res
     // 5. Nothing matches → new. Name similarity ALONE never merges.
     const sameNameOnly = await resolveIdentity(kysely, {
       agencyId: t.app.agencyId,
+      kind: "business",
       sourceProvider: "fake-places",
       sourceProviderId: "fx-996",
       displayName: "Austin Roof Pros",

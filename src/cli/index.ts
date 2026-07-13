@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 
 import { Command } from "commander";
 
@@ -24,6 +24,8 @@ import {
   startRun,
   type RunOptions,
 } from "../app/run-service.js";
+import { loadTemplateDefinition, templateIds } from "../app/template-service.js";
+import { IMPORT_MAX_BYTES } from "../engine/import/csv-import.js";
 import type { Profile } from "../engine/workflow-schema/steps.js";
 import { migrate, migrationStatus } from "../storage/migrate.js";
 import type { ReviewStatus } from "../storage/database-types.js";
@@ -87,15 +89,30 @@ interface RunFlagOptions {
   overrides?: string;
   cap?: string;
   budget?: string;
+  importCsv?: string;
 }
 
 async function toRunOptions(flags: RunFlagOptions): Promise<RunOptions> {
+  let importCsv: string | undefined;
+  if (flags.importCsv !== undefined) {
+    // Size-checked here so a fat-fingered path fails fast; the engine
+    // re-enforces the same ceiling. Preview and start must read the SAME file
+    // content — an edit in between fails the approval scope by design.
+    const stats = await stat(flags.importCsv);
+    if (stats.size > IMPORT_MAX_BYTES) {
+      throw new AppError("VALIDATION_FAILED", `--import-csv file exceeds ${IMPORT_MAX_BYTES / 1024} KiB.`, {
+        path: flags.importCsv,
+      });
+    }
+    importCsv = await readFile(flags.importCsv, "utf8");
+  }
   return {
     inputs: flags.inputs ? ((await readJsonFile(flags.inputs)) as Record<string, unknown>) : undefined,
     profile: flags.profile as Profile | undefined,
     overrides: parseInlineJson(flags.overrides, "--overrides"),
     cap: flags.cap !== undefined ? Number(flags.cap) : undefined,
     budget: flags.budget !== undefined ? Number(flags.budget) : undefined,
+    importCsv,
   };
 }
 
@@ -160,11 +177,17 @@ const workflow = program.command("workflow").description("workflow management");
 
 workflow
   .command("create")
-  .requiredOption("--file <path>", "workflow definition JSON file")
-  .description("validate a definition file and create the workflow with immutable version 1")
-  .action(async (opts: { file: string }) => {
+  .option("--file <path>", "workflow definition JSON file")
+  .option("--template <id>", `built-in template to seed: ${templateIds().join(", ")}`)
+  .description("validate a definition (from a file or a built-in template) and create the workflow with immutable version 1")
+  .action(async (opts: { file?: string; template?: string }) => {
     await run(async (app) => {
-      const raw = await readJsonFile(opts.file);
+      if ((opts.file === undefined) === (opts.template === undefined)) {
+        throw new AppError("VALIDATION_FAILED", "Pass exactly one of --file or --template.", {
+          templates: templateIds(),
+        });
+      }
+      const raw = opts.file ? await readJsonFile(opts.file) : await loadTemplateDefinition(opts.template!);
       const created = await createWorkflowFromDefinition(app, raw);
       return {
         data: created,
@@ -225,7 +248,11 @@ const runFlagDefs = (c: Command): Command =>
     .option("--profile <profile>", "quick_list | call_ready | full")
     .option("--overrides <json>", "typed capability overrides as a JSON object string")
     .option("--cap <n>", "paid record cap (max 100)")
-    .option("--budget <n>", "credit limit for paid steps");
+    .option("--budget <n>", "credit limit for paid steps")
+    .option(
+      "--import-csv <path>",
+      "CSV file for imported-list workflows (≤512 KiB, ≤500 rows); pass the same file to preview and start",
+    );
 
 runFlagDefs(runCmd.command("preview <workflow>"))
   .description("resolve the execution plan and costs, and issue a single-use approval token; spends nothing")

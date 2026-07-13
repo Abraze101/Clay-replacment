@@ -24,6 +24,7 @@
     "mcp:http": "tsx src/mcp/http.ts",
     "web": "tsx src/web/server.ts",
     "worker": "tsx src/cli/index.ts worker",
+    "probe:apollo": "tsx scripts/probe-apollo.ts",
     "probe:serpapi": "tsx scripts/probe-serpapi-maps.ts",
     "ui:dev": "vite dev --config web/vite.config.ts",
     "ui:build": "vite build --config web/vite.config.ts"
@@ -32,6 +33,7 @@
     "@electric-sql/pglite": "^0.5.4",
     "@modelcontextprotocol/sdk": "1.29.0",
     "commander": "^15.0.0",
+    "csv-parse": "7.0.1",
     "csv-stringify": "6.8.1",
     "dotenv": "^17.4.2",
     "kysely": "0.29.3",

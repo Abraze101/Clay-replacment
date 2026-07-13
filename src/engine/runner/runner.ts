@@ -7,9 +7,11 @@ import {
   bumpRunCredits,
   claimRunLease,
   claimStep,
+  countAttemptedSteps,
   deferStepForRateLimit,
   ensureStepRow,
   finalizeStepAttempt,
+  getItemStep,
   getRun,
   getRunItem,
   latestApproval,
@@ -187,6 +189,11 @@ async function runItemStep(
   const eligible = all.filter((i) => i.status === "pending" || i.status === "in_progress");
   const run0 = await getRun(kysely, runId);
 
+  // Paid steps admit records through a DURABLE counter, not the loop index:
+  // the index under-counted prior spend after a resume (completed items leave
+  // the eligible list), and rejected rows must not consume cap slots.
+  let paidConsidered = paid ? await countAttemptedSteps(kysely, runId, defStep.id) : 0;
+
   for (let index = 0; index < eligible.length; index += 1) {
     const itemRef = eligible[index];
     if (!itemRef) continue;
@@ -207,12 +214,27 @@ async function runItemStep(
       throw new AppError("INTERNAL", "Model providers are not wired until Milestone 5.", { stepId: defStep.id });
     }
 
-    // Paid gates: record cap first, then the budget gate BEFORE any claim/spend.
-    if (paid && index >= run0.paid_record_cap) {
-      await ensurePendingStepSkipped(deps, runId, item, defStep.id, "paid_record_cap_reached");
-      continue;
-    }
+    // Paid gates BEFORE any claim/spend: review decision, record cap, budget.
+    // An already-attempted step (crash replay, needs_review, bounded retry)
+    // holds its slot from the counter initializer and must pass through to
+    // finalize — it never re-enters the gates.
     if (paid) {
+      const existing = await getItemStep(kysely, item.id, defStep.id);
+      const attempted =
+        existing !== undefined && existing.status !== "skipped" && existing.status !== "pending";
+      if (!attempted) {
+        if (item.review_status === "rejected") {
+          // A reviewer said no (the professional workflow gates BEFORE paid
+          // enrichment): the row spends nothing and consumes no cap slot.
+          await ensurePendingStepSkipped(deps, runId, item, defStep.id, "review_rejected");
+          continue;
+        }
+        if (paidConsidered >= run0.paid_record_cap) {
+          await ensurePendingStepSkipped(deps, runId, item, defStep.id, "paid_record_cap_reached");
+          continue;
+        }
+        paidConsidered += 1;
+      }
       const run = await getRun(kysely, runId);
       if (round4(num(run.credits_used) + costPerRecord) > round4(num(run.credit_limit))) {
         // Stop BEFORE the next paid item; keep partial results.

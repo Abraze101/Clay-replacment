@@ -53,13 +53,13 @@ The user can say, for example, "Call-Ready, but business main numbers are fine a
 
 ## CLI equivalents
 
-The implemented command surface (M0/M1, plus the M3 `worker`; `run preview` issues the single-use approval token that `run start` consumes):
+The implemented command surface (M0/M1, plus the M3 `worker` and the M4 template/import flags; `run preview` issues the single-use approval token that `run start` consumes):
 
 ```text
-leads workflow create --file workflow.json
+leads workflow create --file workflow.json | --template <id>
 leads workflow validate <workflow-id>
-leads run preview <workflow-id> --inputs campaign.json
-leads run start <workflow-id> --inputs campaign.json --approval <token>
+leads run preview <workflow-id> --inputs campaign.json [--import-csv list.csv]
+leads run start <workflow-id> --inputs campaign.json --approval <token> [--import-csv list.csv]
 leads run status <run-id>
 leads run results <run-id> --status completed
 leads run review <run-id> --approve --all
@@ -69,6 +69,8 @@ leads run cancel <run-id>
 leads export csv <run-id>
 leads worker
 ```
+
+Built-in template ids: `local-service-demo`, `local-business-quick-list`, `professional-executive`, `imported-list-enrich`.
 
 `leads worker` (M3) hosts a resident pg-boss worker for delayed rate-limit resumes. One-shot CLI runs self-heal short provider pauses inline; longer pauses (`runs.resume_at`) need a resident worker — `leads worker` or the web server. PGlite allows only one live process per `pglite://` directory; use a PostgreSQL `DATABASE_URL` to run the worker alongside another entry.
 
@@ -105,6 +107,8 @@ Use for founders, executives, department leaders, and employees at larger compan
 7. Generate a grounded rationale and opener.
 8. Review and export.
 
+The M4 `professional-executive` template implements this with the review gate BEFORE paid enrichment: Apollo people search is credit-free and returns no contact data (ADR-028), so the user reviews the actual sourced rows — name, title, employer, fit score — and approves/rejects them; work-email enrichment (~1 credit per matched record, `full` profile only) then runs over approved rows within the record cap, and rejected rows spend nothing. `quick_list` exports a contact-free list at zero credits. Phone reveal arrives at M5.
+
 ## Workflow 3: imported list
 
 Use when the user already has company names, domains, URLs, or partial contacts.
@@ -115,6 +119,8 @@ Use when the user already has company names, domains, URLs, or partial contacts.
 4. Research the public business website.
 5. Enrich through Apollo when identifiers match.
 6. Score, personalize, review, and export.
+
+M4 import channels (`imported-list-enrich` template): a CSV file via the CLI (`--import-csv`, ≤512 KiB / ≤500 rows), pasted CSV text in the web UI, or `importCsv`/typed `inputs.importRows` over MCP. Rows are parsed once at preview, row-level rejects are listed there, and the accepted rows are bound into the approval hash — an edited list needs a fresh preview. Web file upload arrives with the hosted deployment (M6).
 
 ## Growth path from local to national
 

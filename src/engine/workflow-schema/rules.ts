@@ -16,6 +16,15 @@ export const RULE_FIELDS = {
   rating: "number",
   review_count: "number",
   phone_format_valid: "boolean",
+  // M4 person/contact fields — deterministic from the persisted snapshot.
+  title: "string",
+  employer_name: "string",
+  has_linkedin: "boolean",
+  has_email: "boolean",
+  // Stays false until a real deliverability check writes verified_email (M5);
+  // an email a provider merely found NEVER sets it (contact-data honesty).
+  has_verified_email: "boolean",
+  has_direct_phone: "boolean",
 } as const;
 
 export type RuleField = keyof typeof RULE_FIELDS;

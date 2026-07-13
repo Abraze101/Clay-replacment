@@ -5,6 +5,7 @@ import path from "node:path";
 
 import type { AppContainer } from "../app/container.js";
 import { interpretRequest } from "../app/request-interpreter.js";
+import { listTemplates, loadTemplateDefinition } from "../app/template-service.js";
 import {
   cancelRun,
   createApprovedRun,
@@ -44,11 +45,8 @@ import { HttpError, parseBody, readJsonBody, sendError, sendJson } from "./http-
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Server-side template allowlist; the browser never sends workflow file paths. */
-const WORKFLOW_TEMPLATES: Record<string, URL> = {
-  "local-service-demo": new URL("../../examples/local-service-demo.workflow.json", import.meta.url),
-  "local-business-quick-list": new URL("../../examples/local-business-quick-list.workflow.json", import.meta.url),
-};
+// The template allowlist moved to src/app/template-service.ts (M4): one list
+// shared by web, MCP, and CLI; the browser still never sends file paths.
 
 export async function handleApi(
   app: AppContainer,
@@ -114,6 +112,11 @@ async function route(
 
   if (method === "GET" && seg.length === 1 && seg[0] === "providers") {
     ok(res, requestId, { providers: listProviderStatus(app) });
+    return;
+  }
+
+  if (method === "GET" && seg.length === 1 && seg[0] === "templates") {
+    ok(res, requestId, { templates: await listTemplates() });
     return;
   }
 
@@ -252,9 +255,7 @@ async function createWorkflow(
     const created = await createWorkflowFromDefinition(app, body.definition);
     return [{ ...created, created: true }, 201];
   }
-  const templateUrl = WORKFLOW_TEMPLATES[body.template];
-  if (!templateUrl) throw new AppError("NOT_FOUND", `Unknown template '${body.template}'.`, {});
-  const definition = JSON.parse(await readFile(templateUrl, "utf8")) as unknown;
+  const definition = await loadTemplateDefinition(body.template);
   try {
     const created = await createWorkflowFromDefinition(app, definition);
     return [{ ...created, created: true }, 201];

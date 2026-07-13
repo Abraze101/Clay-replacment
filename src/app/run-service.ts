@@ -8,6 +8,7 @@ import type { Profile } from "../engine/workflow-schema/steps.js";
 import { parseWorkflowDefinition } from "../engine/workflow-schema/workflow.js";
 import { assertRunTransition } from "../engine/runner/states.js";
 import { exportRun, type ExportResult } from "../engine/export/export-run.js";
+import { parseImportCsv } from "../engine/import/csv-import.js";
 import type { ApprovalEntry, JsonObject, ReviewStatus } from "../storage/database-types.js";
 import { num } from "../storage/database-types.js";
 import { getLead } from "../storage/repositories/lead-repo.js";
@@ -37,6 +38,13 @@ export interface RunOptions {
   overrides?: Record<string, unknown>;
   cap?: number;
   budget?: number;
+  /**
+   * Raw CSV text for imported-list workflows (≤512 KiB, ≤500 rows). Parsed
+   * once here into inputs.importRows, so the SAME text must accompany preview
+   * and start — the approval binds row content, and a changed list fails the
+   * plan-hash check by design. XOR with inputs.importRows.
+   */
+  importCsv?: string;
 }
 
 export interface PreviewResult {
@@ -68,16 +76,35 @@ async function resolvePreview(
   const version = await getLatestVersion(app.db.kysely, workflow.id);
   if (!version) throw new AppError("NOT_FOUND", `Workflow '${idOrSlug}' has no validated version.`, {});
   const definition = parseWorkflowDefinition(version.definition);
+
+  let inputs = options.inputs ?? {};
+  const importWarnings: string[] = [];
+  if (options.importCsv !== undefined) {
+    if (inputs["importRows"] !== undefined) {
+      throw new AppError("VALIDATION_FAILED", "Pass either importCsv (raw text) or inputs.importRows — not both.", {});
+    }
+    // Parsed identically on preview AND start: same text → same rows → same
+    // plan hash. The accepted rows persist in the run's resolved plan, so
+    // resume/crash-replay never touches a file again.
+    const parsed = parseImportCsv(options.importCsv);
+    inputs = { ...inputs, importRows: parsed.rows };
+    importWarnings.push(...parsed.warnings);
+    for (const reject of parsed.rejected) {
+      importWarnings.push(`import line ${reject.line}: ${reject.reason}`);
+    }
+  }
+
   const plan = resolvePlan({
     definition,
     workflowChecksum: version.checksum,
-    inputs: options.inputs ?? {},
+    inputs,
     profile: options.profile,
     overrides: parseOverrides(options.overrides),
     requestedCap: options.cap,
     requestedBudget: options.budget,
     providers: app.providers,
   });
+  plan.warnings.push(...importWarnings);
   return { workflowId: workflow.id, workflowVersionId: version.id, workflowVersion: version.version, plan };
 }
 

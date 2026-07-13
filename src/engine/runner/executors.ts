@@ -4,16 +4,21 @@ import { AmbiguousOutcomeError, AppError } from "../../shared/errors.js";
 import type { AttemptClassification, Database, JsonObject } from "../../storage/database-types.js";
 import type { RunItemRow, RunRow } from "../../storage/repositories/run-repo.js";
 import { attachLead, updateRunItem } from "../../storage/repositories/run-repo.js";
+import type { NewLead } from "../../storage/repositories/lead-repo.js";
 import {
   appendContactPointCheck,
+  findLeadByApolloOrgId,
+  findLeadsByDomain,
   insertContactPoint,
   insertLead,
+  setLeadIdentityKeys,
   upsertLeadSource,
 } from "../../storage/repositories/lead-repo.js";
+import { insertIdentityConflict } from "../../storage/repositories/identity-conflict-repo.js";
 import { appendGeneratedOutput } from "../../storage/repositories/output-repo.js";
 import type { EnrichProvider, ProviderRegistry, SourceRecord } from "../../providers/types.js";
 import { resolveIdentity } from "../dedupe/identity.js";
-import { normalizePhone, normalizeSourceRecord } from "../records/normalize.js";
+import { nameKey, normalizeLinkedinUrl, normalizePhone, normalizeSourceRecord } from "../records/normalize.js";
 import { usStateTimezone } from "../records/timezone.js";
 import { SCORE_TEMPLATES, evaluateTemplate } from "../scoring/templates.js";
 import type { FieldContext } from "../workflow-schema/rules.js";
@@ -35,12 +40,21 @@ export interface ItemSnapshot {
     directPhoneE164: string | null;
     workEmail: string | null;
     providerRequestId: string;
+    /** Canonical LinkedIn URL the match revealed (approved source), if any. */
+    linkedinUrl?: string | null;
+    /** NEVER set in M4 — only a 'valid' deliverability check (M5) writes it. */
+    verifiedEmail?: string | null;
   };
   research?: { incomplete: boolean; summary?: string; leadSourceId?: string; reason?: string };
 }
 
 export interface NormalizedFields {
+  kind: "business" | "person";
   displayName: string;
+  firstName: string | null;
+  lastName: string | null;
+  title: string | null;
+  contactName: string | null;
   category: string | null;
   websiteUrl: string | null;
   normalizedDomain: string | null;
@@ -51,21 +65,46 @@ export interface NormalizedFields {
   phoneRaw: string | null;
   phoneE164: string | null;
   phoneFormatValid: boolean | null;
+  email: string | null;
+  normalizedLinkedinUrl: string | null;
+  apolloPersonId: string | null;
+  employerName: string | null;
+  employerWebsiteUrl: string | null;
+  employerDomain: string | null;
+  apolloOrganizationId: string | null;
   rating: number | null;
   reviewCount: number | null;
 }
 
-export function fieldContext(normalized: NormalizedFields): FieldContext {
+/**
+ * Deterministic rule-field context from the persisted snapshot. Person fields
+ * are null/false before enrichment (a filter placed before enrich simply sees
+ * exists → false). Enriched values win over source values; has_verified_email
+ * stays false until a real deliverability check writes it (M5) — an email a
+ * provider merely found NEVER sets it.
+ */
+export function buildFieldContext(snapshot: ItemSnapshot, normalized: NormalizedFields): FieldContext {
+  const enrichment = snapshot.enrichment;
   return {
     name: normalized.displayName,
     category: normalized.category,
     locality: normalized.locality,
     region: normalized.region,
     country: normalized.country,
-    has_website: normalized.websiteUrl !== null,
+    // For a person lead the "has a website" signal is the employer's domain.
+    has_website:
+      normalized.kind === "person"
+        ? normalized.employerDomain !== null || normalized.employerWebsiteUrl !== null
+        : normalized.websiteUrl !== null,
     rating: normalized.rating,
     review_count: normalized.reviewCount,
     phone_format_valid: normalized.phoneFormatValid,
+    title: enrichment?.title ?? normalized.title,
+    employer_name: normalized.employerName,
+    has_linkedin: Boolean(enrichment?.linkedinUrl ?? normalized.normalizedLinkedinUrl),
+    has_email: Boolean(enrichment?.workEmail ?? normalized.email),
+    has_verified_email: Boolean(enrichment?.verifiedEmail),
+    has_direct_phone: (enrichment?.directPhoneE164 ?? null) !== null,
   };
 }
 
@@ -112,7 +151,12 @@ export function executeNormalize(ctx: ExecCtx): ExecOutcome {
   const snapshot = snapshotOf(ctx.item);
   const n = normalizeSourceRecord(snapshot.source);
   const normalized: NormalizedFields = {
+    kind: n.kind,
     displayName: n.displayName,
+    firstName: n.firstName,
+    lastName: n.lastName,
+    title: n.title,
+    contactName: n.contactName,
     category: n.category,
     websiteUrl: n.websiteUrl,
     normalizedDomain: n.normalizedDomain,
@@ -123,6 +167,13 @@ export function executeNormalize(ctx: ExecCtx): ExecOutcome {
     phoneRaw: n.phone?.raw ?? null,
     phoneE164: n.phone?.e164 ?? null,
     phoneFormatValid: n.phone ? n.phone.formatValid : null,
+    email: n.email,
+    normalizedLinkedinUrl: n.normalizedLinkedinUrl,
+    apolloPersonId: n.apolloPersonId,
+    employerName: n.employerName,
+    employerWebsiteUrl: n.employerWebsiteUrl,
+    employerDomain: n.employerDomain,
+    apolloOrganizationId: n.apolloOrganizationId,
     rating: n.rating,
     reviewCount: n.reviewCount,
   };
@@ -157,36 +208,42 @@ export function executeDedupe(ctx: ExecCtx): ExecOutcome {
     commit: async (trx, stepRowId) => {
       const resolution = await resolveIdentity(trx, {
         agencyId: ctx.agencyId,
+        kind: normalized.kind,
         sourceProvider: providerName,
         sourceProviderId: snapshot.source.sourceKey,
         displayName: normalized.displayName,
         normalizedDomain: normalized.normalizedDomain,
         normalizedPhone: normalized.phoneE164,
         locality: normalized.locality,
+        apolloPersonId: normalized.apolloPersonId,
+        normalizedLinkedinUrl: normalized.normalizedLinkedinUrl,
       });
 
-      if (resolution.kind === "conflict") {
-        await updateRunItem(trx, ctx.item.id, {
-          status: "skipped",
-          skipReason: "identity_conflict",
-          dedupeStatus: "conflict",
-          snapshot: {
-            ...snapshot,
-            conflict: {
-              identifier: resolution.identifier,
-              value: resolution.value,
-              existingLeadId: resolution.leadId,
-            },
-          },
-        });
-        return;
-      }
-
-      const leadId =
-        resolution.kind === "matched"
-          ? resolution.leadId
-          : (
-              await insertLead(trx, {
+      const createLead = async (opts: { omitLinkedin?: boolean } = {}): Promise<string> => {
+        const values: NewLead =
+          normalized.kind === "person"
+            ? {
+                agencyId: ctx.agencyId,
+                kind: "person",
+                displayName: normalized.displayName,
+                firstName: normalized.firstName,
+                lastName: normalized.lastName,
+                title: normalized.title,
+                employerLeadId: await findOrCreateEmployerLead(trx, ctx, providerName, normalized),
+                locality: normalized.locality,
+                region: normalized.region,
+                country: normalized.country,
+                // A person lead never carries the employer's domain/phone as
+                // its own identity — that lives on the employer lead.
+                normalizedDomain: null,
+                normalizedPhone: null,
+                sourceProvider: providerName,
+                sourceProviderId: snapshot.source.sourceKey,
+                timezone: usStateTimezone(normalized.region, normalized.country),
+                apolloPersonId: normalized.apolloPersonId,
+                normalizedLinkedinUrl: opts.omitLinkedin ? null : normalized.normalizedLinkedinUrl,
+              }
+            : {
                 agencyId: ctx.agencyId,
                 kind: "business",
                 displayName: normalized.displayName,
@@ -205,8 +262,56 @@ export function executeDedupe(ctx: ExecCtx): ExecOutcome {
                   ? snapshot.source.sourceKey.slice("pid:".length)
                   : null,
                 timezone: usStateTimezone(normalized.region, normalized.country),
-              })
-            ).id;
+                // An imported row's /in/ LinkedIn URL identifies the CONTACT
+                // person, not the business — it stays out of the business
+                // lead's identity and reaches enrichment via the snapshot.
+              };
+        return (await insertLead(trx, values)).id;
+      };
+
+      if (resolution.kind === "conflict") {
+        // Uniform conflict persistence (M4): the new lead still exists — with
+        // the conflicting STRONG identifier left NULL so the partial unique
+        // cannot fire (weak identifiers like domain are non-unique and stay
+        // populated) — the pair is durably flagged in identity_conflicts, and
+        // the item stays out of paid steps and exports. Flag, never merge.
+        const conflictLeadId = await createLead({
+          omitLinkedin: resolution.identifier === "normalized_linkedin_url",
+        });
+        await attachLead(trx, ctx.item.id, ctx.run.id, conflictLeadId, "conflict");
+        await insertIdentityConflict(trx, {
+          leadIdA: resolution.leadId,
+          leadIdB: conflictLeadId,
+          identifierType: resolution.identifier,
+          identifierValue: resolution.value,
+          runId: ctx.run.id,
+        });
+        await upsertLeadSource(trx, {
+          leadId: conflictLeadId,
+          runId: ctx.run.id,
+          runItemId: ctx.item.id,
+          provider: providerName,
+          providerRecordId: snapshot.source.sourceKey,
+          requestId: snapshot.sourceRequestId ?? null,
+          snapshot: snapshot.source,
+        });
+        await updateRunItem(trx, ctx.item.id, {
+          status: "skipped",
+          skipReason: "identity_conflict",
+          dedupeStatus: "conflict",
+          snapshot: {
+            ...snapshot,
+            conflict: {
+              identifier: resolution.identifier,
+              value: resolution.value,
+              existingLeadId: resolution.leadId,
+            },
+          },
+        });
+        return;
+      }
+
+      const leadId = resolution.kind === "matched" ? resolution.leadId : await createLead();
 
       const attach = await attachLead(
         trx,
@@ -260,6 +365,30 @@ export function executeDedupe(ctx: ExecCtx): ExecOutcome {
         });
       }
 
+      if (normalized.email !== null) {
+        // An imported email is discovery, not verification: it enters as
+        // not_checked and only a real deliverability check (M5) upgrades it.
+        const cp = await insertContactPoint(trx, {
+          leadId,
+          type: "email",
+          role: "work",
+          rawValue: normalized.email,
+          normalizedValue: normalized.email,
+          sourceProvider: providerName,
+          sourceRunItemId: ctx.item.id,
+          formatValid: EMAIL_FORMAT_RE.test(normalized.email),
+          formatCheckedAt: new Date(),
+          emailStatus: "not_checked",
+        });
+        await appendContactPointCheck(trx, {
+          contactPointId: cp.id,
+          method: "format",
+          provider: "engine",
+          result: EMAIL_FORMAT_RE.test(normalized.email) ? "valid" : "invalid",
+          runItemStepId: stepRowId,
+        });
+      }
+
       await updateRunItem(trx, ctx.item.id, {
         snapshot: { ...snapshot, sourceLeadSourceId: leadSource.id },
         dedupeStatus: resolution.kind === "matched" ? "matched" : "new",
@@ -268,10 +397,60 @@ export function executeDedupe(ctx: ExecCtx): ExecOutcome {
   };
 }
 
+/**
+ * Find-or-create the employer business lead for a person hit (M4): match on
+ * apollo_organization_id first, then weak domain + normalized name (with a
+ * conflict-safe org-id backfill). No credible match creates a NEW employer
+ * lead — same-domain/different-name stays a separate lead by design (domain is
+ * deliberately non-unique), and employer ambiguity never blocks or flags the
+ * person item. The org:<id> source identity keeps the create idempotent.
+ */
+async function findOrCreateEmployerLead(
+  trx: Kysely<Database>,
+  ctx: ExecCtx,
+  providerName: string,
+  normalized: NormalizedFields,
+): Promise<string | null> {
+  const { employerName, employerWebsiteUrl, employerDomain, apolloOrganizationId } = normalized;
+  if (!employerName && !employerDomain && !apolloOrganizationId) return null;
+
+  if (apolloOrganizationId) {
+    const byOrg = await findLeadByApolloOrgId(trx, ctx.agencyId, apolloOrganizationId);
+    if (byOrg) return byOrg.id;
+  }
+  if (employerDomain && employerName) {
+    const byDomain = await findLeadsByDomain(trx, ctx.agencyId, employerDomain);
+    const match = byDomain.find((l) => l.kind === "business" && nameKey(l.display_name) === nameKey(employerName));
+    if (match) {
+      if (apolloOrganizationId) {
+        await setLeadIdentityKeys(trx, {
+          leadId: match.id,
+          agencyId: ctx.agencyId,
+          runId: ctx.run.id,
+          keys: { apolloOrganizationId },
+        });
+      }
+      return match.id;
+    }
+  }
+
+  const inserted = await insertLead(trx, {
+    agencyId: ctx.agencyId,
+    kind: "business",
+    displayName: employerName ?? employerDomain ?? "Unknown employer",
+    websiteUrl: employerWebsiteUrl,
+    normalizedDomain: employerDomain,
+    sourceProvider: providerName,
+    sourceProviderId: `org:${apolloOrganizationId ?? employerDomain ?? nameKey(employerName ?? "")}`,
+    apolloOrganizationId,
+  });
+  return inserted.id;
+}
+
 export function executeFilter(ctx: ExecCtx): ExecOutcome {
   const step = ctx.step as FilterStep;
   const normalized = requireNormalized(ctx.item);
-  const passed = evaluateRuleGroup(step.conditions, fieldContext(normalized));
+  const passed = evaluateRuleGroup(step.conditions, buildFieldContext(snapshotOf(ctx.item), normalized));
   return {
     cost: 0,
     classification: "completed",
@@ -356,6 +535,17 @@ export async function executeResearch(ctx: ExecCtx): Promise<ExecOutcome> {
 export async function executeEnrich(ctx: ExecCtx, provider: EnrichProvider): Promise<ExecOutcome> {
   const normalized = requireNormalized(ctx.item);
   const snapshot = snapshotOf(ctx.item);
+  // Crash replay of a PAID enrichment: unless the provider proves request-key
+  // idempotency (the fake provider's persisted ledger), re-executing could
+  // double-charge — the interrupted attempt may have completed and been
+  // billed. Book it as ambiguous for review instead (never auto-retry a
+  // possibly-completed paid call).
+  if (ctx.crashReplay && provider.costPerRecord > 0 && provider.idempotentReplay !== true) {
+    throw new AmbiguousOutcomeError(
+      `Enrich step '${ctx.step.id}' was interrupted after a paid call may have completed; provider '${provider.name}' cannot confirm or dedupe it.`,
+      provider.costPerRecord,
+    );
+  }
   // May throw RetryableProviderError / AmbiguousOutcomeError — handled by the runner.
   const outcome = await provider.enrich({
     requestKey: ctx.requestKey,
@@ -364,6 +554,14 @@ export async function executeEnrich(ctx: ExecCtx, provider: EnrichProvider): Pro
     normalizedDomain: normalized.normalizedDomain,
     normalizedPhone: normalized.phoneE164,
     locality: normalized.locality,
+    kind: normalized.kind,
+    firstName: normalized.firstName,
+    lastName: normalized.lastName,
+    title: normalized.title,
+    apolloPersonId: normalized.apolloPersonId,
+    normalizedLinkedinUrl: normalized.normalizedLinkedinUrl,
+    employerName: normalized.employerName,
+    employerDomain: normalized.employerDomain,
   });
 
   if (outcome.kind === "no_match") {
@@ -380,6 +578,7 @@ export async function executeEnrich(ctx: ExecCtx, provider: EnrichProvider): Pro
   const person = outcome.person;
   const directPhone = person.directPhone ? normalizePhone(person.directPhone) : null;
   const workEmail = person.workEmail?.trim().toLowerCase() ?? null;
+  const revealedLinkedin = normalizeLinkedinUrl(person.linkedinUrl);
 
   return {
     cost: outcome.cost,
@@ -429,6 +628,8 @@ export async function executeEnrich(ctx: ExecCtx, provider: EnrichProvider): Pro
 
       if (workEmail) {
         // Discovery is not verification: the address enters as not_checked.
+        // The provider's OWN status claim (e.g. Apollo email_status) is kept
+        // as data in source_metadata, never adopted as our judgment.
         const cp = await insertContactPoint(trx, {
           leadId,
           type: "email",
@@ -437,6 +638,7 @@ export async function executeEnrich(ctx: ExecCtx, provider: EnrichProvider): Pro
           normalizedValue: workEmail,
           sourceProvider: provider.name,
           sourceRunItemId: ctx.item.id,
+          sourceMetadata: person.emailStatusClaim ? { providerClaimedStatus: person.emailStatusClaim } : {},
           formatValid: EMAIL_FORMAT_RE.test(workEmail),
           formatCheckedAt: new Date(),
           emailStatus: "not_checked",
@@ -450,6 +652,22 @@ export async function executeEnrich(ctx: ExecCtx, provider: EnrichProvider): Pro
         });
       }
 
+      // Conflict-safe identity backfill: stable ids the match revealed attach
+      // to the lead unless another lead already holds them (then the pair is
+      // flagged in identity_conflicts and the column stays NULL).
+      if (person.apolloPersonId || person.apolloOrganizationId || revealedLinkedin) {
+        await setLeadIdentityKeys(trx, {
+          leadId,
+          agencyId: ctx.agencyId,
+          runId: ctx.run.id,
+          keys: {
+            apolloPersonId: person.apolloPersonId ?? null,
+            apolloOrganizationId: person.apolloOrganizationId ?? null,
+            normalizedLinkedinUrl: revealedLinkedin,
+          },
+        });
+      }
+
       await updateRunItem(trx, ctx.item.id, {
         snapshot: {
           ...snapshot,
@@ -459,6 +677,7 @@ export async function executeEnrich(ctx: ExecCtx, provider: EnrichProvider): Pro
             directPhoneE164: directPhone?.e164 ?? null,
             workEmail,
             providerRequestId: outcome.providerRequestId,
+            linkedinUrl: revealedLinkedin,
           },
         },
       });
@@ -472,7 +691,7 @@ export function executeScore(ctx: ExecCtx): ExecOutcome {
   if (!template) throw new AppError("INTERNAL", `Unknown score template '${step.template}'.`, { stepId: step.id });
   const normalized = requireNormalized(ctx.item);
   const snapshot = snapshotOf(ctx.item);
-  const score = evaluateTemplate(template, fieldContext(normalized));
+  const score = evaluateTemplate(template, buildFieldContext(snapshot, normalized));
   return {
     cost: 0,
     classification: "completed",

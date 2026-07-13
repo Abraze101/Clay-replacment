@@ -1,17 +1,61 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import type {
   PreviewResult,
   ResultsPage,
   RunItemResult,
   RunListItem,
   StartRunResponse,
+  TemplateSummary,
   WebExportResult,
   WorkflowCreateResponse,
 } from "../src/web/contracts.js";
 import { createTestApp } from "./helpers/setup.js";
 import { pollRunStatus, startTestWebServer } from "./helpers/web.js";
+
+test("web api: templates endpoint lists the four built-ins; an imported run works over HTTP with pasted CSV", async () => {
+  const t = await createTestApp();
+  const web = await startTestWebServer(t);
+  try {
+    const templates = await web.getJson<{ templates: TemplateSummary[] }>("/api/templates");
+    assert.equal(templates.status, 200);
+    assert.deepEqual(
+      templates.body.data?.templates.map((tpl) => tpl.id).sort(),
+      ["imported-list-enrich", "local-business-quick-list", "local-service-demo", "professional-executive"],
+    );
+    assert.equal(
+      templates.body.data?.templates.find((tpl) => tpl.id === "imported-list-enrich")?.sourceProvider,
+      "imported-list",
+    );
+
+    const seeded = await web.postJson<WorkflowCreateResponse>("/api/workflows", { template: "imported-list-enrich" });
+    assert.equal(seeded.status, 201);
+
+    // Pasted CSV travels in the JSON body to preview AND start (approval
+    // binds the row content); reject warnings surface in the envelope.
+    const importCsv = readFileSync(path.resolve("test/fixtures/imported/contacts-messy.csv"), "utf8");
+    const preview = await web.postJson<PreviewResult>("/api/workflows/imported-list-enrich/preview", { importCsv });
+    assert.equal(preview.status, 200);
+    assert.ok(preview.body.warnings?.some((w) => /Accepted 4 of 6/.test(w)));
+    const token = preview.body.data?.approval.token;
+    assert.ok(token);
+
+    const started = await web.postJson<StartRunResponse>("/api/workflows/imported-list-enrich/start", {
+      importCsv,
+      approval: token,
+    });
+    assert.equal(started.status, 202);
+    const atGate = await pollRunStatus(web, started.body.data?.runId ?? "", (s) => s.status === "waiting_review");
+    assert.equal(atGate.counts.items, 4);
+  } finally {
+    await web.close();
+    await t.teardown();
+  }
+});
 
 test("web api: the full happy path works over HTTP — seed, preview, start, review, resume, export, download", async () => {
   const t = await createTestApp();

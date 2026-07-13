@@ -1,0 +1,54 @@
+{
+  "pagination": { "page": 1, "per_page": 100, "total_entries": 3, "total_pages": 1 },
+  "people": [
+    {
+      "id": "sanitized-person-0001",
+      "first_name": "Jane",
+      "last_name": "Sample",
+      "name": "Jane Sample",
+      "title": "Chief Executive Officer",
+      "linkedin_url": "https://www.linkedin.com/in/sanitized-jane-sample",
+      "email_status": null,
+      "city": "Austin",
+      "state": "Texas",
+      "country": "United States",
+      "organization": {
+        "id": "sanitized-org-0001",
+        "name": "Acme Health Sample Co",
+        "website_url": "https://acmehealth.example",
+        "primary_domain": "acmehealth.example"
+      }
+    },
+    {
+      "id": "sanitized-person-0002",
+      "first_name": "Rob",
+      "last_name": "Fictional",
+      "name": "Rob Fictional",
+      "title": "Founder & President",
+      "linkedin_url": "https://www.linkedin.com/in/sanitized-rob-fictional",
+      "email_status": null,
+      "city": "Dallas",
+      "state": "Texas",
+      "country": "United States",
+      "organization": {
+        "id": "sanitized-org-0002",
+        "name": "Fictional Wellness Group",
+        "website_url": "https://fictionalwellness.example",
+        "primary_domain": "fictionalwellness.example"
+      }
+    },
+    {
+      "id": "sanitized-person-0003",
+      "first_name": "Ada",
+      "last_name": "Placeholder",
+      "name": "Ada Placeholder",
+      "title": "Head of Operations",
+      "linkedin_url": null,
+      "email_status": null,
+      "city": "Austin",
+      "state": "Texas",
+      "country": "United States",
+      "organization": null
+    }
+  ]
+}

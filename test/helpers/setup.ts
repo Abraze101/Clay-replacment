@@ -32,6 +32,14 @@ export async function createTestApp(): Promise<TestApp> {
     MAX_STEP_ATTEMPTS: 3,
     // Deterministic pauses in tests: never inline-heal a rate-limit pause.
     RATE_LIMIT_INLINE_WAIT_MAX_SECONDS: 0,
+    // Hermetic: env.ts loads the developer's real .env into process.env, so a
+    // live key there would register live providers inside tests — and a live
+    // adapter in a test container risks real spend. Force them unset; tests
+    // that need a "live" provider register stubs explicitly.
+    SERPAPI_API_KEY: undefined,
+    FIRECRAWL_API_KEY: undefined,
+    APOLLO_API_KEY: undefined,
+    WEBSITE_RESEARCH_PROVIDER: "fake",
   });
   await migrate(app.db);
   return {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { AppError } from "../../shared/errors.js";
+import { importRowSchema } from "../import/csv-import.js";
 import { profileSchema, stepSchema } from "./steps.js";
 
 /**
@@ -14,6 +15,15 @@ export const workflowInputsSchema = z
     locations: z.array(z.string().min(1)).max(20).optional(),
     limit: z.number().int().min(1).max(500).default(25),
     enrichmentProfile: profileSchema.default("quick_list"),
+    /** Professional-contact searches (M4): job titles to match. */
+    personTitles: z.array(z.string().min(1)).max(10).optional(),
+    /**
+     * Imported-list runs (M4): validated rows, normally produced by
+     * parseImportCsv from RunOptions.importCsv. Bound into the plan hash, so
+     * changing the list invalidates an approval. Per-run input — never stored
+     * in a workflow template.
+     */
+    importRows: z.array(importRowSchema).max(500).optional(),
   })
   .strict();
 

@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { useCallback, useEffect, useState } from "react";
 
 import { apiGet, apiPost, errorMessage } from "../api/client.js";
-import type { PreviewResult, WorkflowCreateResponse, WorkflowSummary } from "../api/types.js";
+import type { PreviewResult, TemplateSummary, WorkflowCreateResponse, WorkflowSummary } from "../api/types.js";
 import { navigate } from "../router.js";
 import { toRunOptions, useNewRunFlow } from "../state/newRunFlow.js";
 import { GuidedRequestScreen } from "./GuidedRequestScreen.js";
@@ -14,7 +14,9 @@ export function NewRunWizard(): ReactElement {
   const flow = useNewRunFlow();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [workflows, setWorkflows] = useState<WorkflowSummary[] | null>(null);
-  const [seeding, setSeeding] = useState(false);
+  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [seeding, setSeeding] = useState<string | null>(null);
+  const [sourceProvider, setSourceProvider] = useState<string>("");
   const [previewing, setPreviewing] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
@@ -29,19 +31,41 @@ export function NewRunWizard(): ReactElement {
       const first = list[0];
       if (first) flow.update({ workflowSlug: first.slug });
     });
+    void apiGet<{ templates: TemplateSummary[] }>("/api/templates").then((res) => setTemplates(res.data.templates));
     // Load once on mount; flow.update identity is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadWorkflows]);
 
-  const seed = async (): Promise<void> => {
-    setSeeding(true);
+  // The selected workflow's SOURCE decides which extra inputs make sense
+  // (imported-list needs pasted CSV). Derived from the stored definition, so
+  // it works for template-seeded and custom workflows alike.
+  useEffect(() => {
+    const slug = flow.fields.workflowSlug;
+    if (!slug) {
+      setSourceProvider("");
+      return;
+    }
+    let cancelled = false;
+    void apiGet<{ definition: { steps?: { type: string; provider?: string }[] } }>(`/api/workflows/${slug}`)
+      .then((res) => {
+        if (cancelled) return;
+        const source = res.data.definition.steps?.find((s) => s.type === "source");
+        setSourceProvider(source?.provider ?? "");
+      })
+      .catch(() => setSourceProvider(""));
+    return () => {
+      cancelled = true;
+    };
+  }, [flow.fields.workflowSlug]);
+
+  const seed = async (templateId: string): Promise<void> => {
+    setSeeding(templateId);
     try {
-      await apiPost<WorkflowCreateResponse>("/api/workflows", { template: "local-service-demo" });
-      const list = await loadWorkflows();
-      const first = list[0];
-      if (first) flow.update({ workflowSlug: first.slug });
+      const created = await apiPost<WorkflowCreateResponse>("/api/workflows", { template: templateId });
+      await loadWorkflows();
+      flow.update({ workflowSlug: created.data.slug });
     } finally {
-      setSeeding(false);
+      setSeeding(null);
     }
   };
 
@@ -77,8 +101,10 @@ export function NewRunWizard(): ReactElement {
         <GuidedRequestScreen
           flow={flow}
           workflows={workflows}
+          templates={templates}
           seeding={seeding}
-          onSeed={() => void seed()}
+          sourceProvider={sourceProvider}
+          onSeed={(id) => void seed(id)}
           onNext={() => setStep(2)}
         />
       )}

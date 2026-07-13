@@ -24,16 +24,31 @@ export interface WorkflowSummary {
   createdAt: string | null;
 }
 
-/** Cross-step validation beyond the schema: providers and templates must be registered. */
+/**
+ * Cross-step validation beyond the schema: providers and templates must be
+ * KNOWN. A provider that exists as an implemented adapter but is not yet
+ * configured (its env key is missing — e.g. person-enrichment without
+ * APOLLO_API_KEY) is legal in a stored workflow: the plan resolver enforces
+ * configuration at preview time, and only for steps the profile actually
+ * runs, so a shipped template never blocks the free quick_list path. A name
+ * with NO implemented adapter stays a hard error ("no unknown provider"
+ * guardrail).
+ */
 function validateReferences(app: AppContainer, definition: WorkflowDefinition): void {
+  const catalogNames = new Set(app.providerCatalog.map((c) => c.name));
+  const known = (registered: boolean, provider: string) => registered || catalogNames.has(provider);
   for (const step of definition.steps) {
     if (step.type === "source" && !app.providers.sources.has(step.provider)) {
-      throw new AppError("VALIDATION_FAILED", `Unknown source provider '${step.provider}'.`, { stepId: step.id });
+      // The source always runs (it is step 1): unconfigured is as unusable as unknown here,
+      // but a catalog name still validates so templates can be seeded before setup.
+      if (!catalogNames.has(step.provider)) {
+        throw new AppError("VALIDATION_FAILED", `Unknown source provider '${step.provider}'.`, { stepId: step.id });
+      }
     }
-    if (step.type === "enrich" && !app.providers.enrichers.has(step.provider)) {
+    if (step.type === "enrich" && !known(app.providers.enrichers.has(step.provider), step.provider)) {
       throw new AppError("VALIDATION_FAILED", `Unknown enrich provider '${step.provider}'.`, { stepId: step.id });
     }
-    if (step.type === "research" && !app.providers.researchers.has(step.provider)) {
+    if (step.type === "research" && !known(app.providers.researchers.has(step.provider), step.provider)) {
       throw new AppError("VALIDATION_FAILED", `Unknown research provider '${step.provider}'.`, { stepId: step.id });
     }
     if (step.type === "score" && !SCORE_TEMPLATES.has(step.template)) {

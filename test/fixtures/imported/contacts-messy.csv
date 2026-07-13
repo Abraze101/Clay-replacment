@@ -1,0 +1,7 @@
+﻿COMPANY,website,PHONE,email,LinkedIn_URL,contact,JOB_TITLE,city,state
+Dup Domain One,https://shared-domain.example,512-555-0201,one@shared-domain.example,,Casey Sample,Owner,Austin,TX
+Dup Domain Two,https://shared-domain.example,512-555-0202,two@shared-domain.example,,Jordan Fictional,Manager,Austin,TX
+Bad Linkedin Row,https://badlinkedin.example,512-555-0203,,https://twitter.example/notlinkedin,Riley Sample,Owner,Dallas,TX
+,,,,,,,,
+,,512-555-0204,,,No Identifier,Caller,Houston,TX
+Good Final Row,goodfinal.example,512-555-0205,final@goodfinal.example,,Drew Placeholder,CEO,Austin,TX

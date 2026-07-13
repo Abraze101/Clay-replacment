@@ -1,0 +1,22 @@
+{
+  "id": "professional-executive",
+  "version": 1,
+  "name": "Professional / executive contacts",
+  "description": "M4 Workflow 2: discover decision-makers via Apollo people search (free, NO contact data returned), score fit, review the actual rows, then — full profile only — enrich the approved set with work emails (~1 credit per matched record) AFTER the review gate. quick_list exports a contact-free list at zero credits.",
+  "inputs": {
+    "businessType": "health technology",
+    "personTitles": ["CEO", "Founder", "Owner"],
+    "locations": ["Austin, TX"],
+    "limit": 25,
+    "enrichmentProfile": "quick_list"
+  },
+  "steps": [
+    { "id": "discover", "type": "source", "provider": "professional-contacts" },
+    { "id": "normalize", "type": "normalize" },
+    { "id": "dedupe", "type": "dedupe" },
+    { "id": "fit", "type": "score", "template": "executive-fit" },
+    { "id": "review", "type": "review_gate" },
+    { "id": "enrich", "type": "enrich", "provider": "person-enrichment", "profiles": ["full"] },
+    { "id": "export", "type": "export", "format": "csv" }
+  ]
+}

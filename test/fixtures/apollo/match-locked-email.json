@@ -1,0 +1,21 @@
+{
+  "person": {
+    "id": "sanitized-person-0002",
+    "first_name": "Rob",
+    "last_name": "Fictional",
+    "name": "Rob Fictional",
+    "title": "Founder & President",
+    "linkedin_url": "https://www.linkedin.com/in/sanitized-rob-fictional",
+    "email": "email_not_unlocked@domain.com",
+    "email_status": null,
+    "city": "Dallas",
+    "state": "Texas",
+    "country": "United States",
+    "organization": {
+      "id": "sanitized-org-0002",
+      "name": "Fictional Wellness Group",
+      "website_url": "https://fictionalwellness.example",
+      "primary_domain": "fictionalwellness.example"
+    }
+  }
+}

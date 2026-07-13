@@ -25,6 +25,54 @@ function env(result: unknown): ToolEnvelope {
   return structured as ToolEnvelope;
 }
 
+test("mcp flow: workflow_create seeds templates by id; importCsv rides the run options", async () => {
+  const t = await createTestApp();
+  try {
+    const client = await connectClient(t.app, "codex-sim");
+
+    // XOR: neither or both of definition/template is a validation error.
+    const neither = env(await client.callTool({ name: "workflow_create", arguments: {} }));
+    assert.equal(neither.ok, false);
+    assert.equal(neither.error?.code, "VALIDATION_FAILED");
+
+    const seeded = env(
+      await client.callTool({ name: "workflow_create", arguments: { template: "imported-list-enrich" } }),
+    );
+    assert.equal(seeded.ok, true);
+    assert.equal((seeded.data as { slug: string }).slug, "imported-list-enrich");
+
+    const importCsv = "company,website\nAcme Sample Co,https://acmesample.example\n";
+    const preview = env(
+      await client.callTool({
+        name: "run_preview",
+        arguments: { workflow: "imported-list-enrich", importCsv },
+      }),
+    );
+    assert.equal(preview.ok, true);
+    const token = (preview.data as { approval: { token: string } }).approval.token;
+
+    // Different CSV content on start = different plan hash = rejected approval.
+    const drifted = env(
+      await client.callTool({
+        name: "run_start",
+        arguments: { workflow: "imported-list-enrich", importCsv: importCsv.replace("Acme", "Edited"), approval: token },
+      }),
+    );
+    assert.equal(drifted.ok, false);
+    assert.match(drifted.error?.code ?? "", /^APPROVAL_/);
+
+    const started = env(
+      await client.callTool({
+        name: "run_start",
+        arguments: { workflow: "imported-list-enrich", importCsv, approval: token },
+      }),
+    );
+    assert.equal(started.ok, true);
+  } finally {
+    await t.teardown();
+  }
+});
+
 test("mcp flow: preview → approve → start → review → resume → results → export, all through the tool contract", async () => {
   const t = await createTestApp();
   try {

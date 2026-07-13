@@ -678,6 +678,41 @@ export async function requeueFailedSteps(db: Kysely<Database>, runId: string): P
   return failed.length;
 }
 
+export async function getItemStep(
+  db: Kysely<Database>,
+  runItemId: string,
+  stepId: string,
+): Promise<RunItemStepRow | undefined> {
+  return await db
+    .selectFrom("run_item_steps")
+    .selectAll()
+    .where("run_item_id", "=", runItemId)
+    .where("step_id", "=", stepId)
+    .executeTakeFirst();
+}
+
+/**
+ * Records that consumed (or may still consume) paid consideration for a step:
+ * claimed at least once and not merely skipped or deferred back to pending.
+ * This is the paid-record-cap's durable counter — unlike a loop index it
+ * survives resume (completed items leave the eligible list) and rejected-row
+ * skips.
+ */
+export async function countAttemptedSteps(db: Kysely<Database>, runId: string, stepId: string): Promise<number> {
+  const rows = await db
+    .selectFrom("run_item_steps")
+    .select("id")
+    .where("step_id", "=", stepId)
+    .where("status", "in", ["running", "completed", "failed", "needs_review"])
+    .where(
+      "run_item_id",
+      "in",
+      db.selectFrom("run_items").select("id").where("run_id", "=", runId),
+    )
+    .execute();
+  return rows.length;
+}
+
 export async function listSteps(db: Kysely<Database>, runItemId: string): Promise<RunItemStepRow[]> {
   return await db
     .selectFrom("run_item_steps")

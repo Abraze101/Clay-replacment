@@ -102,6 +102,8 @@ Acceptance:
 
 ## Milestone 4: professional and imported workflows
 
+Amended at M4 planning (2026-07-12, ADR-028): Apollo people search is the `mixed_people/api_search` endpoint (master API key; credit-free; returns no contact data — the legacy `/search` endpoint 403s on Basic plans), so the professional template places its review gate BEFORE paid enrichment; Apollo phone reveal requires an async webhook and is deferred to M5. The imported-list channel is inline CSV text (CLI `--import-csv` file, UI paste, MCP `importCsv`) or typed `inputs.importRows`, parsed once and bound into the approval hash; web multipart upload is deferred to M6.
+
 Deliver:
 
 - Apollo search/enrichment adapter as a typed adapter over official REST APIs, not MCP.

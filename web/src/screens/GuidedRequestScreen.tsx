@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { useState } from "react";
 
 import { apiPost, errorMessage } from "../api/client.js";
-import type { InterpretedRequest, WorkflowSummary } from "../api/types.js";
+import type { InterpretedRequest, TemplateSummary, WorkflowSummary } from "../api/types.js";
 import type { NewRunFields, NewRunFlow } from "../state/newRunFlow.js";
 
 /**
@@ -13,14 +13,19 @@ import type { NewRunFields, NewRunFlow } from "../state/newRunFlow.js";
 export function GuidedRequestScreen({
   flow,
   workflows,
+  templates,
   onSeed,
   seeding,
+  sourceProvider,
   onNext,
 }: {
   flow: NewRunFlow;
   workflows: WorkflowSummary[] | null;
-  onSeed: () => void;
-  seeding: boolean;
+  templates: TemplateSummary[];
+  onSeed: (templateId: string) => void;
+  seeding: string | null;
+  /** The selected workflow's source provider (drives import-specific inputs). */
+  sourceProvider: string;
   onNext: () => void;
 }): ReactElement {
   const [text, setText] = useState("");
@@ -93,20 +98,49 @@ export function GuidedRequestScreen({
           <span>Template</span>
           {workflows === null ? (
             <span className="muted">Loading…</span>
-          ) : workflows.length === 0 ? (
-            <button className="btn" disabled={seeding} onClick={onSeed}>
-              {seeding ? "Seeding…" : "Seed the demo template"}
-            </button>
           ) : (
-            <select value={fields.workflowSlug} onChange={(e) => flow.update({ workflowSlug: e.target.value })}>
-              {workflows.map((wf) => (
-                <option key={wf.slug} value={wf.slug}>
-                  {wf.name}
-                </option>
-              ))}
-            </select>
+            <>
+              {workflows.length > 0 && (
+                <select value={fields.workflowSlug} onChange={(e) => flow.update({ workflowSlug: e.target.value })}>
+                  {workflows.map((wf) => (
+                    <option key={wf.slug} value={wf.slug}>
+                      {wf.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {templates
+                .filter((t) => !workflows.some((wf) => wf.slug === t.id))
+                .map((t) => (
+                  <button
+                    key={t.id}
+                    className="btn"
+                    disabled={seeding !== null}
+                    title={t.description}
+                    onClick={() => onSeed(t.id)}
+                  >
+                    {seeding === t.id ? "Seeding…" : `Add “${t.name}”`}
+                  </button>
+                ))}
+            </>
           )}
         </label>
+        {sourceProvider === "imported-list" && (
+          <label className="field">
+            <span>Paste your list as CSV (max 500 rows)</span>
+            <textarea
+              className="request-box"
+              rows={6}
+              value={fields.importCsv}
+              placeholder={"company,website,phone,email,linkedin,first_name,last_name,title,city,state\nAcme Roofing,acmeroofing.com,512-555-0100,…"}
+              onChange={(e) => flow.update({ importCsv: e.target.value })}
+            />
+            <span className="muted">
+              Recognized columns: company/name, website/domain, phone, email, linkedin, first/last/contact name, title,
+              address, city, state, country. Rows without any identifier are rejected and listed in the preview.
+            </span>
+          </label>
+        )}
         <label className="field">
           <span>Business category {evidence(flow, "businessType")}</span>
           <input

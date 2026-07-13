@@ -13,3 +13,4 @@ exports/
 
 # Probe-generated fixture drafts await human review; promote them out of drafts/ deliberately.
 test/fixtures/serpapi/drafts/
+test/fixtures/apollo/drafts/

@@ -96,3 +96,55 @@ test("e2e: the full CLI flow survives process exits between every command", { ti
     rmSync(workDir, { recursive: true, force: true });
   }
 });
+
+test("e2e: the imported-list template runs from the CLI with --template and --import-csv", { timeout: 240_000 }, async () => {
+  const workDir = mkdtempSync(path.join(tmpdir(), "lead-engine-e2e-import-"));
+  const projectRoot = path.resolve();
+  const tsx = path.join(projectRoot, "node_modules", ".bin", "tsx");
+  const cliEntry = path.join(projectRoot, "src", "cli", "index.ts");
+  const env = {
+    ...process.env,
+    DATABASE_URL: `pglite://${path.join(workDir, "db")}`,
+    EXPORT_DIR: path.join(workDir, "exports"),
+    FAKE_ENRICH_LEDGER_PATH: path.join(workDir, "ledger.json"),
+  };
+
+  async function cli(...args: string[]): Promise<{ stdout: string }> {
+    return await execFileAsync(tsx, [cliEntry, "--json", ...args], { env, cwd: projectRoot });
+  }
+  function parse<T>(stdout: string): { ok: boolean; data: T; summary: string } {
+    return JSON.parse(stdout) as { ok: boolean; data: T; summary: string };
+  }
+
+  try {
+    await cli("db", "migrate");
+    const created = parse<{ slug: string }>(
+      (await cli("workflow", "create", "--template", "imported-list-enrich")).stdout,
+    );
+    assert.equal(created.data.slug, "imported-list-enrich");
+
+    const csvPath = path.join(projectRoot, "test", "fixtures", "imported", "contacts-clean.csv");
+    const preview = parse<{ plan: { estimatedCost: number }; approval: { token: string } }>(
+      (await cli("run", "preview", "imported-list-enrich", "--import-csv", csvPath)).stdout,
+    );
+    assert.ok(preview.ok);
+    assert.equal(preview.data.plan.estimatedCost, 0, "a quick_list import spends nothing");
+
+    const started = parse<{ runId: string; status: string }>(
+      (
+        await cli(
+          "run",
+          "start",
+          "imported-list-enrich",
+          "--import-csv",
+          csvPath,
+          "--approval",
+          preview.data.approval.token,
+        )
+      ).stdout,
+    );
+    assert.equal(started.data.status, "waiting_review");
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
+});
