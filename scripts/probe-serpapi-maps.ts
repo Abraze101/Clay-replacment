@@ -20,6 +20,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import "dotenv/config";
+
 import { SerpApiClient, serpApiLocalResultSchema } from "../src/providers/serpapi/client.js";
 import { extractSourceKey, parseUsAddress } from "../src/providers/serpapi/identity.js";
 

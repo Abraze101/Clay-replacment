@@ -10,3 +10,6 @@ coverage/
 exports/
 *.log
 .DS_Store
+
+# Probe-generated fixture drafts await human review; promote them out of drafts/ deliberately.
+test/fixtures/serpapi/drafts/
