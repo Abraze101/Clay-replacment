@@ -20,9 +20,10 @@ import {
 } from "../app/run-service.js";
 import { createWorkflowFromDefinition, listWorkflowSummaries, showWorkflow } from "../app/workflow-service.js";
 import { listProviderStatus, testProviderConnection } from "../app/provider-service.js";
+import { listActiveSuppressions, releaseSuppressionById, suppress } from "../app/suppression-service.js";
 import { AppError, isAppError } from "../shared/errors.js";
 import { decodeCursor, encodeCursor } from "../shared/pagination.js";
-import type { WebExportResult, WorkflowCreateResponse } from "./contracts.js";
+import type { SuppressionEntry, WebExportResult, WorkflowCreateResponse } from "./contracts.js";
 import {
   createWorkflowBodySchema,
   exportBodySchema,
@@ -33,6 +34,7 @@ import {
   runOptionsBodySchema,
   runsQuerySchema,
   startBodySchema,
+  suppressionBodySchema,
 } from "./contracts.js";
 import { HttpError, parseBody, readJsonBody, sendError, sendJson } from "./http-util.js";
 
@@ -132,6 +134,38 @@ async function route(
     const body = parseBody(interpretBodySchema, await readJsonBody(req));
     ok(res, requestId, interpretRequest(body.text));
     return;
+  }
+
+  // M5 suppressions: the entity-specific do-not-contact list, applied live
+  // before every call-ready export.
+  if (seg[0] === "suppressions") {
+    if (method === "GET" && seg.length === 1) {
+      const rows = await listActiveSuppressions(app, { includeReleased: url.searchParams.get("includeReleased") === "true" });
+      const suppressions: SuppressionEntry[] = rows.map((r) => ({
+        id: r.id,
+        scope: r.scope,
+        normalizedValue: r.normalized_value,
+        reason: r.reason,
+        requestedBy: r.requested_by,
+        createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+        releasedAt: r.released_at === null ? null : r.released_at instanceof Date ? r.released_at.toISOString() : String(r.released_at),
+      }));
+      ok(res, requestId, { suppressions });
+      return;
+    }
+    if (method === "POST" && seg.length === 1) {
+      const body = parseBody(suppressionBodySchema, await readJsonBody(req));
+      const row = await suppress(app, body);
+      ok(res, requestId, { id: row.id, scope: row.scope, normalizedValue: row.normalized_value }, { status: 201 });
+      return;
+    }
+    if (method === "POST" && seg.length === 3 && seg[2] === "release") {
+      await readJsonBody(req); // drain
+      const released = await releaseSuppressionById(app, seg[1] ?? "");
+      if (!released) throw new AppError("NOT_FOUND", "Suppression not found or already released.", {});
+      ok(res, requestId, { id: seg[1], released: true });
+      return;
+    }
   }
 
   if (seg[0] === "workflows") {

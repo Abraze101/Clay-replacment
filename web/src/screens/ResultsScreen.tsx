@@ -2,8 +2,22 @@ import type { ReactElement } from "react";
 import { useCallback, useEffect, useState } from "react";
 
 import { apiGet, apiPost, errorMessage } from "../api/client.js";
-import type { ResultsPage, RunItemResult, RunStatusSummary, WebExportResult } from "../api/types.js";
+import type { ResultPhone, ResultsPage, RunItemResult, RunStatusSummary, WebExportResult } from "../api/types.js";
 import { navigate } from "../router.js";
+
+/** Honest validation label: exactly what was checked, never a bare 'verified'. */
+function describeValidation(phone: ResultPhone): string {
+  switch (phone.validationLevel) {
+    case "identity_match":
+      return `identity ${phone.identityMatch ?? "unknown"}`;
+    case "line_status":
+      return `line ${phone.lineStatus ?? "unknown"}`;
+    case "format":
+      return "format-only";
+    default:
+      return "unchecked";
+  }
+}
 
 type ReviewFilter = "" | "unreviewed" | "approved" | "rejected" | "regenerate";
 type StatusFilter = "" | "pending" | "in_progress" | "completed" | "failed" | "skipped";
@@ -76,10 +90,41 @@ export function ResultsScreen({ runId }: { runId: string }): ReactElement {
     }
   };
 
-  const review = (decision: "approved" | "rejected", ids: string[] | "all"): Promise<void> =>
+  const review = (decision: "approved" | "rejected" | "regenerate", ids: string[] | "all"): Promise<void> =>
     act(async () => {
       await apiPost(`/api/runs/${runId}/review`, ids === "all" ? { decision, all: true } : { decision, itemIds: ids });
       setSelected(new Set());
+    });
+
+  const regenerateSelected = (ids: string[]): Promise<void> =>
+    act(async () => {
+      await apiPost(`/api/runs/${runId}/review`, { decision: "regenerate", itemIds: ids });
+      // run retry re-runs generation for the marked items (free of engine credits).
+      await apiPost(`/api/runs/${runId}/retry`, {});
+      setSelected(new Set());
+    });
+
+  const suppressSelected = (ids: string[]): Promise<void> =>
+    act(async () => {
+      const chosen = items.filter((i) => ids.includes(i.runItemId) && i.leadId);
+      for (const item of chosen) {
+        await apiPost("/api/suppressions", {
+          scope: "lead",
+          value: item.leadId as string,
+          reason: `suppressed from results of run ${runId}`,
+        });
+      }
+      setSelected(new Set());
+    });
+
+  const continueSelected = (ids: string[]): Promise<void> =>
+    act(async () => {
+      // The engine continues APPROVED rows: approve the selection first, then
+      // open the continuation wizard (same preview → approval path).
+      if (ids.length > 0) {
+        await apiPost(`/api/runs/${runId}/review`, { decision: "approved", itemIds: ids });
+      }
+      navigate(`/new/continue/${runId}`);
     });
 
   const continueRun = (): Promise<void> =>
@@ -159,6 +204,7 @@ export function ResultsScreen({ runId }: { runId: string }): ReactElement {
                 <option value="unreviewed">unreviewed</option>
                 <option value="approved">approved</option>
                 <option value="rejected">rejected</option>
+                <option value="regenerate">regenerate</option>
               </select>
             </label>{" "}
             <label>
@@ -205,6 +251,22 @@ export function ResultsScreen({ runId }: { runId: string }): ReactElement {
           <button className="btn btn-small" disabled={busy} onClick={() => void review("rejected", "all")}>
             Reject all items
           </button>
+          <button
+            className="btn btn-small"
+            disabled={busy || selectedIds.length === 0}
+            title="Re-runs the generate step for the selected leads (free) and returns them to the review queue"
+            onClick={() => void regenerateSelected(selectedIds)}
+          >
+            Regenerate copy
+          </button>
+          <button
+            className="btn btn-small"
+            disabled={busy || selectedIds.length === 0}
+            title="Adds the selected leads to the do-not-contact list (applied live before every call-ready export)"
+            onClick={() => void suppressSelected(selectedIds)}
+          >
+            Suppress selected
+          </button>
         </div>
 
         <table className="data-table">
@@ -215,9 +277,11 @@ export function ResultsScreen({ runId }: { runId: string }): ReactElement {
               <th>Category</th>
               <th>Website</th>
               <th>Locality</th>
-              <th>Main phone</th>
+              <th>Phones (role · checked)</th>
+              <th>Email</th>
               <th>Owner</th>
               <th>Score</th>
+              <th>Call-ready</th>
               <th>Status</th>
               <th>Review</th>
             </tr>
@@ -233,7 +297,10 @@ export function ResultsScreen({ runId }: { runId: string }): ReactElement {
                     onChange={() => toggle(item.runItemId)}
                   />
                 </td>
-                <td>{item.business?.name ?? item.sourceKey}</td>
+                <td>
+                  {item.business?.name ?? item.sourceKey}
+                  {item.suppressed && <span className="chip review-rejected"> suppressed</span>}
+                </td>
                 <td>{item.business?.category ?? "—"}</td>
                 <td>
                   {item.business?.website ? (
@@ -245,9 +312,40 @@ export function ResultsScreen({ runId }: { runId: string }): ReactElement {
                   )}
                 </td>
                 <td>{item.business?.locality ?? "—"}</td>
-                <td>{item.business?.businessMainPhone ?? "—"}</td>
+                <td>
+                  {item.phones.length === 0
+                    ? (item.business?.businessMainPhone ?? "—")
+                    : item.phones.map((phone) => (
+                        <div key={`${item.runItemId}-${phone.role}-${phone.e164 ?? "raw"}`} className={phone.suppressed ? "row-muted" : ""}>
+                          {phone.e164 ?? "unparseable"}{" "}
+                          <span className="muted">
+                            {phone.role}
+                            {phone.lineType ? ` · ${phone.lineType}` : ""} · {describeValidation(phone)}
+                            {phone.suppressed ? " · SUPPRESSED" : ""}
+                          </span>
+                        </div>
+                      ))}
+                </td>
+                <td>
+                  {item.email?.address ? (
+                    <>
+                      {item.email.address} <span className="muted">[{item.email.status ?? "not_checked"}]</span>
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td>{item.owner ? `${item.owner.name}${item.owner.title ? `, ${item.owner.title}` : ""}` : "—"}</td>
                 <td>{item.score ?? "—"}</td>
+                <td>
+                  {item.callReadinessStatus ? (
+                    <span className={`chip readiness-${item.callReadinessStatus}`} title={item.callReadinessReason ?? ""}>
+                      {item.callReadinessStatus}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td>
                   <span className={`chip status-${item.status}`}>{item.status}</span>
                   {item.skipReason && <span className="muted"> {item.skipReason}</span>}
@@ -274,6 +372,14 @@ export function ResultsScreen({ runId }: { runId: string }): ReactElement {
               Continue run past review gate
             </button>
           )}
+          <button
+            className="btn"
+            disabled={busy}
+            title="Approves the current selection (if any) and opens a new call-ready run over this run's APPROVED leads — no re-sourcing"
+            onClick={() => void continueSelected(selectedIds)}
+          >
+            Continue {selectedIds.length > 0 ? `selected (${selectedIds.length})` : "approved leads"} into deeper enrichment
+          </button>
           <button className="btn" disabled={busy} onClick={() => void doExport()}>
             Export approved leads to CSV
           </button>
@@ -285,8 +391,9 @@ export function ResultsScreen({ runId }: { runId: string }): ReactElement {
           </p>
         )}
         <p className="muted">
-          Export requires the review gate to be passed and includes only approved, completed leads. Continuing selected
-          leads into deeper enrichment arrives at Milestone 5.
+          Export requires the review gate to be passed and includes only approved, completed leads; call-readiness
+          'invalid' and suppressed rows are excluded from the call-ready CSV (kept here). Deeper enrichment opens a new
+          run with its own preview and approval.
         </p>
       </section>
     </div>

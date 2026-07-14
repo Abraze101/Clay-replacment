@@ -25,6 +25,8 @@
     },
     { "id": "website", "type": "research", "provider": "fake-website", "profiles": ["call_ready", "full"] },
     { "id": "owner", "type": "enrich", "provider": "fake-apollo", "optional": true, "profiles": ["call_ready", "full"] },
+    { "id": "validate-phones", "type": "enrich", "capability": "phone_validation", "profiles": ["call_ready", "full"] },
+    { "id": "verify-email", "type": "enrich", "capability": "email_verification", "profiles": ["full"] },
     { "id": "fit", "type": "score", "template": "local-service", "profiles": ["full"] },
     { "id": "opener", "type": "generate", "template": "agency-opener", "profiles": ["full"] },
     { "id": "review", "type": "review_gate" },

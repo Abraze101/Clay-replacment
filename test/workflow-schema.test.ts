@@ -9,9 +9,11 @@ function withSteps(steps: unknown[]): Record<string, unknown> {
   return { ...demoDefinition(), steps };
 }
 
-test("schema: the demo definition (all 10 step types) validates", () => {
+test("schema: the demo definition (all 10 step types, incl. M5 capability steps) validates", () => {
   const definition = parseWorkflowDefinition(demoDefinition());
-  assert.equal(definition.steps.length, 10);
+  assert.equal(definition.steps.length, 12);
+  const types = new Set(definition.steps.map((s) => s.type));
+  assert.equal(types.size, 10, "every approved step type appears");
 });
 
 test("schema: unknown step types are rejected", () => {

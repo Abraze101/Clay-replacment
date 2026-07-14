@@ -27,8 +27,12 @@ export class InProcessRunWorker implements JobQueue {
   }
 
   async runToBoundary(runId: string): Promise<RunRow> {
+    // Provider-side waits self-heal inline: rate-limit pauses and async
+    // vendor-job polls (awaiting_provider, ADR-029) both carry resume_at.
+    const providerWait = (r: RunRow): boolean =>
+      r.pause_reason === "rate_limited" || r.pause_reason === "awaiting_provider";
     let run = await executeRun(this.deps, runId);
-    while (run.status === "paused" && run.pause_reason === "rate_limited" && run.resume_at !== null) {
+    while (run.status === "paused" && providerWait(run) && run.resume_at !== null) {
       const waitMs = new Date(run.resume_at).getTime() - Date.now();
       if (waitMs > this.maxInlineWaitMs) break; // too long to hold inline; leave for a resident worker
       if (waitMs > 0) await sleep(waitMs);
@@ -36,7 +40,7 @@ export class InProcessRunWorker implements JobQueue {
       // first: another actor may have resumed and re-paused with a LATER
       // resume_at while we slept — never resume a pause before it is due.
       const current = await getRun(this.deps.db.kysely, runId);
-      if (current.status !== "paused" || current.pause_reason !== "rate_limited") break;
+      if (current.status !== "paused" || !providerWait(current)) break;
       if (current.resume_at !== null && new Date(current.resume_at) > new Date()) {
         run = current;
         continue; // recompute the wait against the fresh resume_at

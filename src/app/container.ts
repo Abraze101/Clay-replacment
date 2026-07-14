@@ -32,7 +32,11 @@ export async function createContainer(
 ): Promise<AppContainer> {
   const env: Env = { ...parseEnv(), ...overrides };
   const db = await connectDb(env.DATABASE_URL);
-  const providers = buildRegistry(env, { enrichLedgerPath: env.FAKE_ENRICH_LEDGER_PATH });
+  const providers = buildRegistry(env, {
+    enrichLedgerPath: env.FAKE_ENRICH_LEDGER_PATH,
+    capabilityLedgerPath: env.FAKE_CAPABILITY_LEDGER_PATH,
+    db: db.kysely,
+  });
   const actor = overrides.actor ?? "cli";
   const runnerDeps: RunnerDeps = {
     db,
@@ -41,6 +45,7 @@ export async function createContainer(
     maxStepAttempts: env.MAX_STEP_ATTEMPTS,
     exportDir: env.EXPORT_DIR,
     actor,
+    generateMaxOutputTokens: env.GENERATE_MAX_OUTPUT_TOKENS,
   };
   // Driver selection: the caller's explicit choice wins (leads worker forces
   // pgboss); long-lived entries (web, mcp) pass defaultJobDriver('pgboss') so

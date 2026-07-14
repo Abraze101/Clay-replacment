@@ -26,6 +26,9 @@
     "worker": "tsx src/cli/index.ts worker",
     "probe:apollo": "tsx scripts/probe-apollo.ts",
     "probe:serpapi": "tsx scripts/probe-serpapi-maps.ts",
+    "bench:phone": "tsx scripts/bench/phone-validation.ts",
+    "bench:email": "tsx scripts/bench/email-verification.ts",
+    "bench:discovery": "tsx scripts/bench/contact-discovery.ts",
     "ui:dev": "vite dev --config web/vite.config.ts",
     "ui:build": "vite build --config web/vite.config.ts"
   },

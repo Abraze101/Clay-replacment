@@ -48,6 +48,9 @@ export async function executeSourceStep(
     limit: plan.sourceLimit,
     personTitles: plan.inputs.personTitles,
     importRows: plan.inputs.importRows,
+    ...(plan.inputs.continueFromRunId && plan.inputs.continuationLeadIds
+      ? { continuation: { runId: plan.inputs.continueFromRunId, leadIds: plan.inputs.continuationLeadIds } }
+      : {}),
   };
 
   if (!isPagedPaidSource(provider)) {

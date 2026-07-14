@@ -25,14 +25,25 @@ test("profiles: quick_list enables no paid steps — cap 0, zero cost rows, stil
   }
 });
 
-test("profiles: call_ready adds research + enrichment but not scoring/generation", async () => {
+test("profiles: call_ready adds research + enrichment + phone validation, but not scoring/generation", async () => {
   const t = await createTestApp();
   try {
     const slug = await createDemoWorkflow(t.app);
     const { plan } = await previewRun(t.app, slug, { profile: "call_ready" });
-    assert.deepEqual(willRunIds(plan), ["discover", "normalize", "dedupe", "screen", "website", "owner", "review", "export"]);
+    assert.deepEqual(willRunIds(plan), [
+      "discover",
+      "normalize",
+      "dedupe",
+      "screen",
+      "website",
+      "owner",
+      "validate-phones",
+      "review",
+      "export",
+    ]);
     assert.equal(plan.paidRecordCap, 15);
-    assert.equal(plan.estimatedCost, 15);
+    // owner 1/record + phone validation 2/record (line_type + line_status).
+    assert.equal(plan.estimatedCost, 45);
   } finally {
     await t.teardown();
   }
@@ -43,11 +54,12 @@ test("profiles: full runs everything; presets compile into visible typed steps",
   try {
     const slug = await createDemoWorkflow(t.app);
     const { plan } = await previewRun(t.app, slug, { profile: "full" });
-    assert.equal(willRunIds(plan).length, 10);
-    assert.deepEqual(
-      plan.estimatedPaidActions,
-      [{ stepId: "owner", provider: "fake-apollo", count: 15, costPerRecord: 1 }],
-    );
+    assert.equal(willRunIds(plan).length, 12);
+    assert.deepEqual(plan.estimatedPaidActions, [
+      { stepId: "owner", provider: "fake-apollo", count: 15, costPerRecord: 1 },
+      { stepId: "validate-phones", provider: "fake-phone-validation", count: 15, costPerRecord: 2 },
+      { stepId: "verify-email", provider: "fake-email-verification", count: 15, costPerRecord: 1 },
+    ]);
   } finally {
     await t.teardown();
   }
@@ -65,21 +77,23 @@ test("overrides: skipPersonalization and findOwner=false disable their steps and
     const noOwner = await previewRun(t.app, slug, { profile: "full", overrides: { findOwner: false } });
     const enrich = noOwner.plan.steps.find((s) => s.id === "owner");
     assert.equal(enrich?.willRun, false);
-    // With the only paid step disabled, the paid cap drops to zero.
-    assert.equal(noOwner.plan.paidRecordCap, 0);
-    assert.equal(noOwner.plan.estimatedCost, 0);
+    // Owner discovery off; the M5 contact-validation steps stay paid.
+    assert.equal(noOwner.plan.paidRecordCap, 15);
+    assert.equal(noOwner.plan.estimatedCost, 45);
   } finally {
     await t.teardown();
   }
 });
 
-test("overrides: M5-only capabilities are accepted, hashed, and surfaced as warnings — never silent behavior", async () => {
+test("overrides: a capability override with no matching step warns and is hashed — never a silent no-op", async () => {
   const t = await createTestApp();
   try {
     const slug = await createDemoWorkflow(t.app);
     const base = await previewRun(t.app, slug, { profile: "full" });
+    // The demo workflow has no email_discovery capability step, so the
+    // override changes nothing — the plan says so out loud.
     const withOverride = await previewRun(t.app, slug, { profile: "full", overrides: { findEmail: true } });
-    assert.ok(withOverride.plan.warnings.some((w) => w.includes("Milestone 5")));
+    assert.ok(withOverride.plan.warnings.some((w) => w.includes("has no email_discovery step")));
     assert.notEqual(withOverride.plan.planHash, base.plan.planHash, "overrides are bound into the plan hash");
   } finally {
     await t.teardown();

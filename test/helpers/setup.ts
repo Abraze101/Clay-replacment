@@ -20,7 +20,9 @@ export interface TestApp {
   teardown(): Promise<void>;
 }
 
-export async function createTestApp(): Promise<TestApp> {
+export async function createTestApp(
+  extraOverrides: Parameters<typeof createContainer>[0] = {},
+): Promise<TestApp> {
   const tempDir = mkdtempSync(path.join(tmpdir(), "lead-engine-test-"));
   const ledgerPath = path.join(tempDir, "fake-enrich-ledger.json");
   const exportDir = path.join(tempDir, "exports");
@@ -40,6 +42,24 @@ export async function createTestApp(): Promise<TestApp> {
     FIRECRAWL_API_KEY: undefined,
     APOLLO_API_KEY: undefined,
     WEBSITE_RESEARCH_PROVIDER: "fake",
+    // M5 capabilities: fakes with a per-test ledger; vendor keys forced unset.
+    FAKE_CAPABILITY_LEDGER_PATH: path.join(tempDir, "fake-capability-ledger.json"),
+    PHONE_VALIDATION_PROVIDER: "fake",
+    EMAIL_VERIFICATION_PROVIDER: "fake",
+    CONTACT_DISCOVERY_PROVIDER: "fake",
+    TWILIO_ACCOUNT_SID: undefined,
+    TWILIO_AUTH_TOKEN: undefined,
+    ZEROBOUNCE_API_KEY: undefined,
+    MILLIONVERIFIER_API_KEY: undefined,
+    BETTERCONTACT_API_KEY: undefined,
+    FULLENRICH_API_KEY: undefined,
+    LEADMAGIC_API_KEY: undefined,
+    // Model registry stays empty unless a test opts into the fake model.
+    GENERATE_MODEL_PROVIDER: undefined,
+    MINIMAX_API_KEY: undefined,
+    OPENAI_API_KEY: undefined,
+    ANTHROPIC_API_KEY: undefined,
+    ...extraOverrides,
   });
   await migrate(app.db);
   return {

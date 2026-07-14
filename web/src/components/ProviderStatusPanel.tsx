@@ -6,7 +6,10 @@ const KIND_LABELS: Record<ProviderStatusInfo["kind"], string> = {
   source: "finds businesses",
   enrich: "finds people/contacts (paid)",
   research: "reads public websites",
-  model: "writes summaries/openers",
+  model: "writes summaries/openers (your model account, not engine credits)",
+  "phone-validation": "checks phone line status (paid, per signal)",
+  "email-verification": "checks email deliverability (paid; unknowns refunded)",
+  "contact-discovery": "finds direct/mobile numbers and work emails (paid on delivery)",
 };
 
 export function ProviderStatusPanel({ providers }: { providers: ProviderStatusInfo[] }): ReactElement {

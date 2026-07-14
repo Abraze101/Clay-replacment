@@ -53,24 +53,29 @@ The user can say, for example, "Call-Ready, but business main numbers are fine a
 
 ## CLI equivalents
 
-The implemented command surface (M0/M1, plus the M3 `worker` and the M4 template/import flags; `run preview` issues the single-use approval token that `run start` consumes):
+The implemented command surface (M0/M1, the M3 `worker`, the M4 template/import flags, and the M5 continuation/regeneration/suppression additions; `run preview` issues the single-use approval token that `run start` consumes):
 
 ```text
 leads workflow create --file workflow.json | --template <id>
 leads workflow validate <workflow-id>
-leads run preview <workflow-id> --inputs campaign.json [--import-csv list.csv]
-leads run start <workflow-id> --inputs campaign.json --approval <token> [--import-csv list.csv]
+leads run preview <workflow-id> --inputs campaign.json [--import-csv list.csv] [--continue-from <run-id>]
+leads run start <workflow-id> --inputs campaign.json --approval <token> [--import-csv list.csv] [--continue-from <run-id>]
 leads run status <run-id>
 leads run results <run-id> --status completed
-leads run review <run-id> --approve --all
+leads run review <run-id> --approve | --reject | --regenerate [--item <ids...> | --all]
 leads run resume <run-id> [--budget <n> --cap <n> --approval <fresh-token>]
 leads run retry <run-id>
 leads run cancel <run-id>
+leads suppression add --scope phone|email|domain|lead --value <v> --reason <text>
+leads suppression release <id>
+leads suppression list [--scope <s>] [--include-released]
 leads export csv <run-id>
 leads worker
 ```
 
-Built-in template ids: `local-service-demo`, `local-business-quick-list`, `professional-executive`, `imported-list-enrich`.
+Built-in template ids: `local-service-demo`, `local-business-quick-list`, `professional-executive`, `imported-list-enrich`, `call-ready-continuation`.
+
+Selected-lead continuation (M5): `--continue-from <run-id>` (or `inputs.continueFromRunId`) on a `run-continuation` workflow resolves the prior run's APPROVED, completed leads at preview, binds the selection into the approval hash (a review flip there invalidates the token), re-emits the persisted source records with zero provider calls, and skips any paid contact work a lead already carries (fresh signals are never re-purchased). `--regenerate` marks items whose generated copy should be redone; `leads run retry` then re-runs their generate step (free of engine credits) and returns them to the review queue. Suppressions are normalized on save, applied by the call-readiness policy when capability steps run, and re-evaluated LIVE before every export.
 
 `leads worker` (M3) hosts a resident pg-boss worker for delayed rate-limit resumes. One-shot CLI runs self-heal short provider pauses inline; longer pauses (`runs.resume_at`) need a resident worker — `leads worker` or the web server. PGlite allows only one live process per `pglite://` directory; use a PostgreSQL `DATABASE_URL` to run the worker alongside another entry.
 

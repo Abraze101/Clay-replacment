@@ -57,16 +57,17 @@ test("credit gate: resuming without more budget re-pauses; a raised budget requi
       (err: { code?: string }) => err.code === "APPROVAL_REQUIRED",
     );
 
-    // Preview the new scope, consume its token, resume: run completes its work.
-    const reapproval = await previewRun(t.app, slug, { profile: "full", budget: 20 });
-    const resumed = await resumeRun(t.app, run.id, { budget: 20, approval: reapproval.approval.token });
+    // Preview the new scope, consume its token, resume: run completes its work
+    // (11 enrich + 18 phone validation + 3 email verification = 32).
+    const reapproval = await previewRun(t.app, slug, { profile: "full", budget: 40 });
+    const resumed = await resumeRun(t.app, run.id, { budget: 40, approval: reapproval.approval.token });
     assert.equal(resumed.status, "waiting_review");
-    assert.equal(num(resumed.credits_used), 11, "continued from item 4 without re-spending items 1-3");
-    assert.equal(await sumStepCosts(t.app.db.kysely, run.id), 11);
+    assert.equal(num(resumed.credits_used), 32, "continued from item 4 without re-spending items 1-3");
+    assert.equal(await sumStepCosts(t.app.db.kysely, run.id), 32);
 
     // The approval history is append-only: both approvals persisted.
     assert.equal(resumed.approvals.length, 2);
-    assert.equal(resumed.approvals[1]?.creditLimit, 20);
+    assert.equal(resumed.approvals[1]?.creditLimit, 40);
   } finally {
     await t.teardown();
   }

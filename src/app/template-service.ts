@@ -14,6 +14,7 @@ const WORKFLOW_TEMPLATES: Record<string, URL> = {
   "local-business-quick-list": new URL("../../examples/local-business-quick-list.workflow.json", import.meta.url),
   "professional-executive": new URL("../../examples/professional-executive.workflow.json", import.meta.url),
   "imported-list-enrich": new URL("../../examples/imported-list-enrich.workflow.json", import.meta.url),
+  "call-ready-continuation": new URL("../../examples/call-ready-continuation.workflow.json", import.meta.url),
 };
 
 export interface TemplateSummary {

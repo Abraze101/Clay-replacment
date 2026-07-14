@@ -3,6 +3,14 @@
  * name; the registry resolves them. Nothing here is specific to any vendor —
  * M0 registers only fake implementations.
  */
+import type {
+  ContactDiscoveryProvider,
+  EmailVerificationProvider,
+  PhoneValidationProvider,
+} from "./capabilities.js";
+import type { ModelProvider } from "./models/types.js";
+
+export * from "./capabilities.js";
 
 /** Structured person hit from a professional-contact search (M4/Apollo). */
 export interface SourcePersonFields {
@@ -74,6 +82,12 @@ export interface SourceQuery {
   personTitles?: string[];
   /** Imported-list runs (M4): validated rows from the run inputs. */
   importRows?: ImportRow[];
+  /**
+   * Selected-lead continuation (M5): re-emit the prior run's approved leads
+   * from the database instead of calling any provider. Free by construction;
+   * the lead-id set is bound into the approval plan hash at preview.
+   */
+  continuation?: { runId: string; leadIds: string[] };
 }
 
 /** Free discovery of candidate businesses/people. */
@@ -200,22 +214,33 @@ export interface ResearchProvider {
 }
 
 /**
- * Shared model-provider interface (MiniMax/OpenAI/Anthropic adapters arrive
- * M5). M0 keeps the registry EMPTY: a workflow with a generate step must still
- * complete, skipping generation with `model_provider_not_configured`.
+ * Shared model-provider interface (M5, ADR-032) — see models/types.ts. The
+ * registry stays EMPTY unless a model provider is configured: a workflow with
+ * a generate step must still complete, skipping generation with
+ * `model_provider_not_configured`.
  */
-export interface ModelProvider {
-  readonly name: string;
-  generate(input: { template: string; evidence: Record<string, unknown> }): Promise<Record<string, unknown>>;
-}
+export type { ModelProvider } from "./models/types.js";
+export * from "./models/types.js";
 
 export interface ProviderRegistry {
   sources: Map<string, SourceProvider>;
   enrichers: Map<string, EnrichProvider>;
   researchers: Map<string, ResearchProvider>;
   models: Map<string, ModelProvider>;
+  /** M5 contact-enrichment capabilities. Each map holds the configured provider(s) for that capability. */
+  phoneValidation: Map<string, PhoneValidationProvider>;
+  emailVerification: Map<string, EmailVerificationProvider>;
+  contactDiscovery: Map<string, ContactDiscoveryProvider>;
 }
 
 export function emptyRegistry(): ProviderRegistry {
-  return { sources: new Map(), enrichers: new Map(), researchers: new Map(), models: new Map() };
+  return {
+    sources: new Map(),
+    enrichers: new Map(),
+    researchers: new Map(),
+    models: new Map(),
+    phoneValidation: new Map(),
+    emailVerification: new Map(),
+    contactDiscovery: new Map(),
+  };
 }

@@ -102,12 +102,12 @@ test("approval tokens: raising budget on resume requires and consumes a fresh to
     assert.equal(run.status, "paused");
 
     await assert.rejects(
-      () => resumeRun(t.app, run.id, { budget: 20 }),
+      () => resumeRun(t.app, run.id, { budget: 40 }),
       (err: { code?: string }) => err.code === "APPROVAL_REQUIRED",
     );
 
-    const reapproval = await previewRun(t.app, slug, { profile: "full", budget: 20 });
-    const resumed = await resumeRun(t.app, run.id, { budget: 20, approval: reapproval.approval.token });
+    const reapproval = await previewRun(t.app, slug, { profile: "full", budget: 40 });
+    const resumed = await resumeRun(t.app, run.id, { budget: 40, approval: reapproval.approval.token });
     assert.equal(resumed.status, "waiting_review");
     assert.equal(resumed.approvals.length, 2, "approval history is append-only");
     assert.ok(resumed.approvals[1]?.id, "the resume approval references its token row");

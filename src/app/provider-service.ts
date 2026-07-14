@@ -1,12 +1,13 @@
 import { AppError } from "../shared/errors.js";
 import { ApolloClient } from "../providers/apollo/client.js";
 import { FirecrawlClient } from "../providers/firecrawl/client.js";
+import type { ProviderCatalogEntry } from "../providers/registry.js";
 import { SerpApiClient } from "../providers/serpapi/client.js";
 import type { AppContainer } from "./container.js";
 
 export interface ProviderStatusEntry {
   name: string;
-  kind: "source" | "enrich" | "research" | "model";
+  kind: ProviderCatalogEntry["kind"];
   connected: boolean;
   paid: boolean;
   costPerRecord?: number;
@@ -15,6 +16,8 @@ export interface ProviderStatusEntry {
   description?: string;
   /** True when a zero-cost connection test is available via provider_test. */
   testable?: boolean;
+  /** Concrete vendor behind a capability entry (adapter built ≠ vendor selected). */
+  vendor?: string;
 }
 
 /**
@@ -45,6 +48,9 @@ export function listProviderStatus(app: AppContainer): ProviderStatusEntry[] {
   for (const p of app.providers.enrichers.values()) push(p.name, "enrich", p.costPerRecord > 0, p.costPerRecord);
   for (const p of app.providers.researchers.values()) push(p.name, "research", (p.costPerRecord ?? 0) > 0, p.costPerRecord);
   for (const p of app.providers.models.values()) push(p.name, "model", true);
+  for (const p of app.providers.phoneValidation.values()) push(p.name, "phone-validation", true);
+  for (const p of app.providers.emailVerification.values()) push(p.name, "email-verification", true, p.costPerRecord);
+  for (const p of app.providers.contactDiscovery.values()) push(p.name, "contact-discovery", true);
 
   for (const catalog of app.providerCatalog) {
     if (seen.has(catalog.name)) continue;
@@ -56,6 +62,7 @@ export function listProviderStatus(app: AppContainer): ProviderStatusEntry[] {
       requiresEnv: catalog.requiresEnv,
       description: catalog.description,
       testable: false,
+      ...(catalog.vendor ? { vendor: catalog.vendor } : {}),
     });
   }
   return entries;

@@ -80,7 +80,7 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Date:** 2026-07-10
 - **Evidence:** Directive §13; candidate research in `docs/proposals/build-vs-adopt.md` §3.
 - **Reason:** Benchmark on match rate, accuracy, attribution, cost per usable result, latency, API reliability, webhook/reconciliation behavior, ambiguous-request handling, and provider/resale terms — plus the per-adapter idempotency questionnaire (directive §11).
-- **Status:** pending (M5 benchmark)
+- **Status:** pending (M5 benchmark) — all three adapters are BUILT and fixture-tested (ADR-030); protocol + harness: `docs/benchmarks-m5.md`, `pnpm bench:discovery`. Selection is an env change (ADR-031) once the owner records the decision here.
 - **Revisit trigger:** Benchmark results; later, pricing or terms changes by the selected vendor.
 
 ## ADR-009: Twilio Lookup as first phone-validation candidate
@@ -89,8 +89,8 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Date:** 2026-07-10
 - **Evidence:** Directive §13; `docs/proposals/build-vs-adopt.md` — Twilio's per-signal packages map one-to-one onto the `contact_point_checks` validation model.
 - **Reason:** Clean per-signal mapping (format, line type, line status, identity match) supports the contact-data-honesty rule that no single `verified` boolean exists.
-- **Status:** pending (M5)
-- **Revisit trigger:** M5 integration results, Twilio pricing/signal changes, or a candidate with better signal fidelity.
+- **Status:** pending (M5 benchmark) — the Twilio Lookup v2 adapter is BUILT and fixture-tested (ADR-030) with per-signal mapping onto contact_point_checks; interface neutrality is proven by the shared capability contract suite (fake + Twilio). Protocol: `docs/benchmarks-m5.md`, `pnpm bench:phone`.
+- **Revisit trigger:** M5 benchmark results, Twilio pricing/signal changes, or a candidate with better signal fidelity (a second live adapter, e.g. Telnyx, stays the future-proofing note).
 
 ## ADR-010: Email verifier
 
@@ -98,7 +98,7 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Date:** 2026-07-10
 - **Evidence:** Directive §13; `docs/proposals/build-vs-adopt.md` — ZeroBounce's taxonomy matches the `valid | invalid | catch_all | unknown | role_based | not_checked` vocabulary; MillionVerifier is the bulk cost tier.
 - **Reason:** Verification status semantics must map losslessly onto the persisted email-status vocabulary; two verifiers would also prove interface neutrality.
-- **Status:** pending (M5 benchmark)
+- **Status:** pending (M5 benchmark) — BOTH adapters are BUILT and fixture-tested (ADR-030); each maps losslessly onto the persisted email-status vocabulary and models the unknown-refund policy (`costOnUnknown: 0`). Protocol: `docs/benchmarks-m5.md`, `pnpm bench:email`.
 - **Revisit trigger:** Benchmark results; taxonomy or pricing changes.
 
 ## ADR-011: Foursquare OS Places
@@ -116,8 +116,8 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Date:** 2026-07-10
 - **Evidence:** Directive §15.
 - **Reason:** Powers natural-language workflow drafts, preview explanations, summaries, fit rationale, cold-call notes, openers, and configuration assistance. Constraints are architectural: it may not call lead providers outside application services, bypass preview/approval, write to the database, mark contact info verified, be the sole qualification authority, own run state, or be required for deterministic sourcing/export. Nothing model-provider-specific is architectural.
-- **Status:** pending (M5)
-- **Revisit trigger:** MiniMax pricing, quality, or availability changes.
+- **Status:** pending (owner account decision) — the M5 adapter is BUILT behind the shared model-provider interface alongside OpenAI and Anthropic (ADR-032); generation runs fixture-only until the owner adopts a MiniMax (or other) key. Every constraint listed above is enforced in code.
+- **Revisit trigger:** MiniMax pricing, quality, or availability changes; the owner's account decision.
 
 ## ADR-013: crawlee rejected for website research
 
@@ -267,3 +267,40 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Reason:** Search being credit-free and contact-less makes the professional workflow's "review real rows before any spend" gate structurally cheap; the two-endpoint scope keeps the guardrail surface (no outbound actions) auditable; owning the HTTP layer keeps the charged/uncharged/ambiguous taxonomy explicit and fixture-testable.
 - **Status:** accepted
 - **Revisit trigger:** Apollo pricing/tier gating changes (they shifted repeatedly in 2026), the M5 phone-reveal webhook design, managed-credit/resale design (ADR-014), or Apollo publishing request ids/idempotency keys that would let ambiguous outcomes reconcile automatically.
+
+## ADR-029: Submit-then-poll for async contact discovery; no webhook receiver at M5
+
+- **Decision:** Async contact-discovery vendors (BetterContact, FullEnrich) are driven by submit → persist the vendor job id in `run_item_steps.result.capabilityJob` → poll on later attempts scheduled via `next_attempt_at`; the run parks as `paused/awaiting_provider` with `resume_at` = the earliest poll due (the same auto-resume machinery as rate-limit pauses, in both job drivers). A pending poll is neither an error nor a spent attempt (`PendingProviderJobError` → `deferStepForPoll`). Crash replay with a persisted job id re-polls — never re-submits; a submit that dies before the job id commits reconciles via the vendor's echoed client reference where an API exists, else books `AmbiguousOutcomeError` → `needs_review` (the ADR-028 Apollo-match precedent; LeadMagic, with no job id, stays in that class for all unconfirmed outcomes). No inbound webhook receiver is built at M5 — the deployment is local-only until M6, and Apollo's phone reveal (webhook-ONLY delivery) stays deferred accordingly.
+- **Date:** 2026-07-13
+- **Evidence:** Owner decision at M5 planning (webhooks deferred to the M6 HTTPS deployment); BetterContact and FullEnrich both expose poll endpoints and echo client references (custom_fields / bulk name); offline proof in `test/capability-poll-resume.test.ts` (pending → defer → awaiting_provider pause → auto-resume ×2 → delivery, cost booked once at delivery; attempts not consumed by polls).
+- **Reason:** Submit-then-poll gets async vendors working without public infrastructure, and a persisted job id turns the crash-replay problem from "possibly double-paid" into "re-read the answer" — strictly safer than sync vendors without request ids.
+- **Status:** accepted
+- **Revisit trigger:** The M6 public HTTPS deployment (webhooks become cheap — Apollo phone reveal unlocks then), or a selected vendor deprecating its poll endpoint.
+
+## ADR-030: All six capability adapters built at M5; vendor selection deferred to owner benchmarks
+
+- **Decision:** Build all benchmark candidates as full adapters behind the M5 capability interfaces (`src/providers/capabilities.ts`): Twilio Lookup v2 (`twilio-lookup`, PhoneValidationProvider), ZeroBounce + MillionVerifier (EmailVerificationProvider), BetterContact + FullEnrich + LeadMagic (ContactDiscoveryProvider — one instance serves BOTH phone_discovery and email_discovery steps via the request's `wanted` kinds). All are ADR-025-style plain fetch + Zod clients with the paid-call contract in the docblock and the charged/uncharged/ambiguous taxonomy fixture-tested per vendor plus a shared neutrality suite. Cost models are explicit: `costPerSignal` (Twilio bills per signal package; the plan resolver prices a validation step by its requested `signals`), `costOnUnknown: 0` (both email verifiers refund unknowns), `costPerKind` with found-only billing and phone≈10×email (discovery vendors), `costOnNoResult: 0` everywhere. Adapter built ≠ vendor selected: the registry activates exactly one vendor per capability via env selection (ADR-031), and the ADR-008/009/010 decisions wait for the owner-run benchmarks (`docs/benchmarks-m5.md`, `pnpm bench:*` — CI-refusing, spend-confirming, sanitized reports).
+- **Date:** 2026-07-13
+- **Evidence:** Owner decision at M5 planning ("build all candidate adapters"). Endpoint paths/fields and charging policies encode public API knowledge as of early 2026 and are marked for live re-verification via each harness's `--probe` mode before benchmark spend; the load-bearing assumptions (unknown refunds, package-error charging, per-kind credit ratios) are priced into previews and must be confirmed then.
+- **Reason:** With adapters pre-built, the benchmark IS the integration test, and the owner's post-benchmark selection is an env change, not an engineering project.
+- **ADR-026 re-evaluation (its revisit trigger fired — M5 is the multi-provider milestone):** the hand-rolled serial per-client limiter remains sufficient: steps execute strictly sequentially under the exclusive run lease, a discovery step calls exactly ONE configured vendor, and the "waterfall" happens inside the vendors. p-queue stays unadopted. New revisit trigger: parallel per-item capability fan-out or multiple resident workers sharing one client instance.
+- **Status:** accepted (vendor selections pending — ADR-008/009/010)
+- **Revisit trigger:** Benchmark results (owner decision), vendor API/pricing drift found at probe time, or Twilio ambiguity noise at volume (a ~$0.01 lookup timeout books needs_review; a usage-API auto-reconciliation could relax this).
+
+## ADR-031: Capability env-selection pattern (doubly opt-in, per capability)
+
+- **Decision:** `PHONE_VALIDATION_PROVIDER=fake|twilio`, `EMAIL_VERIFICATION_PROVIDER=fake|zerobounce|millionverifier`, and `CONTACT_DISCOVERY_PROVIDER=fake|bettercontact|fullenrich|leadmagic` extend the `WEBSITE_RESEARCH_PROVIDER` pattern: the deterministic fake providers (shared persisted ledger, `FAKE_CAPABILITY_LEDGER_PATH`) bind by default so the whole Call-Ready flow runs offline; a live vendor binds only when BOTH the selection and its key(s) are present; a selection WITHOUT keys leaves the capability empty so plan resolution fails loudly (never a silent fake under a live-looking selection). One discovery instance registers for both discovery step capabilities while `findPhones`/`findEmail` stay independently overridable (the step's `wanted` kinds constrain each call).
+- **Date:** 2026-07-13
+- **Evidence:** ADR-027's doubly-opt-in precedent; registry behavior covered by the capability plan-resolution and web provider-status tests.
+- **Reason:** Selection stays an env concern, per capability, with no engine or workflow changes when the owner picks or switches vendors.
+- **Status:** accepted
+- **Revisit trigger:** Multi-vendor waterfalls per capability (running two discovery vendors in sequence), which would need an ordered selection list instead of a single choice.
+
+## ADR-032: Model adapters as plain typed fetch behind ONE shared generation interface
+
+- **Decision:** MiniMax, OpenAI, and Anthropic generation adapters (`src/providers/models/`) implement one shared `ModelProvider` interface — `generate(request with kind, promptVersion, engine-built prompt, Zod outputSchema + derived strict wire schema, constraints)` returning validated output or an honest `invalid_output` — as plain `fetch` + Zod clients (extends ADR-025; MiniMax has no official TS SDK, and one testing style covers all three; honest counterpoint: the official OpenAI/Anthropic SDKs ship parse helpers and typed errors we forgo). Structured output per vendor: OpenAI Responses API `json_schema` strict; Anthropic Messages `output_config.format json_schema`; MiniMax schema-in-prompt + ONE in-adapter repair round-trip. The ENGINE owns prompts, evidence bundles, and grounding (`src/engine/generation/`): versioned templates (`fit-rationale/v1` → fit_summary, `call-notes/v1` → call_notes, `opener/v1` → opener; bump on any prompt/schema change), claims must cite evidence ids from persisted rows, ungrounded claims are stripped and a required section left empty invalidates the output (retry once, then the step completes `generation_invalid_output` and the lead stays usable). Selection: `GENERATE_MODEL_PROVIDER` (or key-presence with preference minimax > openai > anthropic per ADR-012; `fake` registers the deterministic fake). Generation books engine cost 0 — model calls bill the owner's model account; token usage is recorded informationally. Transport errors keep the taxonomy (429 → RateLimit pause; 5xx/timeout → retryable; NEVER ambiguous — no engine credits at risk). `skipPersonalization` narrows to personalization templates only (call notes survive it). Regeneration: review decision `regenerate` + `run_retry` re-runs the generate step (fresh request key), appends a new output row (history is append-only), and returns the item to `unreviewed`.
+- **Date:** 2026-07-13
+- **Evidence:** `test/model-adapters.test.ts` (per-vendor contract + shared same-request-same-schema check), `test/generation-grounding.test.ts`, `test/generate-step.test.ts`, `test/regenerate-flow.test.ts`; `test/generate-disabled.test.ts` stays green (empty registry remains the baseline). Exact model ids/endpoints (`MiniMax-M3`, `gpt-5-mini`, MiniMax intl base URL) are env-configurable and flagged for live verification when the owner adds keys — no MiniMax account exists yet (ADR-012 stays pending on the account decision).
+- **Reason:** One interface, one grounding enforcement point, one fixture-testing style; nothing model-provider-specific is architectural, and every M5 acceptance behavior works with generation disabled.
+- **Status:** accepted (MiniMax account/key remains the owner's pending ADR-012 decision)
+- **Revisit trigger:** The M5+ embedded assistant needing streaming/tool-use (SDKs earn their keep there), vendor structured-output API changes, or the owner's model-provider account decisions.

@@ -679,7 +679,7 @@ CREATE TABLE exports (
 
 **`0004` (M4)** — `leads.apollo_person_id`, `apollo_organization_id`, `normalized_linkedin_url`, `verified_email` + their partial unique indexes; `identity_conflicts`.
 
-**`0005` (M5)** — `suppressions`; `run_items.call_readiness_status` + `call_readiness_reason`; call-ready CSV column groups and export-time suppression evaluation wired into the §16 no-op rule.
+**`0005` (M5)** — `suppressions`; `run_items.call_readiness_status` + `call_readiness_reason`; call-ready CSV column groups and export-time suppression evaluation wired into the §16 no-op rule. **Applied 2026-07-13** with two additions beyond this document: `generated_outputs.kind` gained `'call_notes'` (grounded cold-call notes are an M5 generation kind) and `runs.pause_reason` gained `'awaiting_provider'` (submit-then-poll async vendors park the run until the earliest poll is due — ADR-029).
 
 **`0006` (M6, sketch only)** — per-workspace encrypted `provider_credentials` (server-side only, write-only after entry, rotatable/deletable, never exposed to models or support diagnostics) and authentication columns. Designed at M6; not part of this proposal's DDL.
 

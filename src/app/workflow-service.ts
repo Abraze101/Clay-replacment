@@ -45,8 +45,24 @@ function validateReferences(app: AppContainer, definition: WorkflowDefinition): 
         throw new AppError("VALIDATION_FAILED", `Unknown source provider '${step.provider}'.`, { stepId: step.id });
       }
     }
-    if (step.type === "enrich" && !known(app.providers.enrichers.has(step.provider), step.provider)) {
-      throw new AppError("VALIDATION_FAILED", `Unknown enrich provider '${step.provider}'.`, { stepId: step.id });
+    if (step.type === "enrich" && step.capability) {
+      // Capability steps resolve their provider from the capability registry
+      // at plan time; only an explicit pin needs to name a known adapter.
+      const map =
+        step.capability === "phone_validation"
+          ? app.providers.phoneValidation
+          : step.capability === "email_verification"
+            ? app.providers.emailVerification
+            : app.providers.contactDiscovery;
+      if (step.provider && !map.has(step.provider) && !catalogNames.has(step.provider)) {
+        throw new AppError(
+          "VALIDATION_FAILED",
+          `Unknown ${step.capability} provider '${step.provider}'.`,
+          { stepId: step.id },
+        );
+      }
+    } else if (step.type === "enrich" && !known(app.providers.enrichers.has(step.provider ?? ""), step.provider ?? "")) {
+      throw new AppError("VALIDATION_FAILED", `Unknown enrich provider '${step.provider ?? "(none)"}'.`, { stepId: step.id });
     }
     if (step.type === "research" && !known(app.providers.researchers.has(step.provider), step.provider)) {
       throw new AppError("VALIDATION_FAILED", `Unknown research provider '${step.provider}'.`, { stepId: step.id });

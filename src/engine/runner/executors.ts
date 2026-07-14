@@ -45,6 +45,15 @@ export interface ItemSnapshot {
     /** NEVER set in M4 — only a 'valid' deliverability check (M5) writes it. */
     verifiedEmail?: string | null;
   };
+  /** M5 contact-capability results (bounded summary; full rows live in contact_points). */
+  contacts?: {
+    directPhoneE164?: string | null;
+    workEmail?: string | null;
+    /** Set ONLY by a 'valid' email_verification result — the has_verified_email rule source. */
+    verifiedEmail?: string | null;
+    phonesFound?: number;
+    emailsFound?: number;
+  };
   research?: { incomplete: boolean; summary?: string; leadSourceId?: string; reason?: string };
 }
 
@@ -102,9 +111,9 @@ export function buildFieldContext(snapshot: ItemSnapshot, normalized: Normalized
     title: enrichment?.title ?? normalized.title,
     employer_name: normalized.employerName,
     has_linkedin: Boolean(enrichment?.linkedinUrl ?? normalized.normalizedLinkedinUrl),
-    has_email: Boolean(enrichment?.workEmail ?? normalized.email),
-    has_verified_email: Boolean(enrichment?.verifiedEmail),
-    has_direct_phone: (enrichment?.directPhoneE164 ?? null) !== null,
+    has_email: Boolean(enrichment?.workEmail ?? snapshot.contacts?.workEmail ?? normalized.email),
+    has_verified_email: Boolean(enrichment?.verifiedEmail ?? snapshot.contacts?.verifiedEmail),
+    has_direct_phone: (enrichment?.directPhoneE164 ?? snapshot.contacts?.directPhoneE164 ?? null) !== null,
   };
 }
 

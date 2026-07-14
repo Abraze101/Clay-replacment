@@ -2,7 +2,7 @@
   "id": "local-business-quick-list",
   "version": 1,
   "name": "Local business quick list",
-  "description": "Milestone 3 Quick List: discover local businesses via SerpAPI's Google Maps engine, normalize, dedupe, and export a CSV — no paid person/contact enrichment.",
+  "description": "Local business list: discover via SerpAPI's Google Maps engine, normalize, dedupe, export. quick_list spends nothing on contacts; call_ready adds phone discovery + validation; full adds email discovery + verification. The M5 capability steps are visible below and excluded by profile, never hidden.",
   "inputs": {
     "businessType": "roofing contractor",
     "locations": ["Austin, TX"],
@@ -13,6 +13,10 @@
     { "id": "discover", "type": "source", "provider": "local-business" },
     { "id": "normalize", "type": "normalize" },
     { "id": "dedupe", "type": "dedupe" },
+    { "id": "find-phones", "type": "enrich", "capability": "phone_discovery", "profiles": ["call_ready", "full"] },
+    { "id": "validate-phones", "type": "enrich", "capability": "phone_validation", "profiles": ["call_ready", "full"] },
+    { "id": "find-email", "type": "enrich", "capability": "email_discovery", "profiles": ["full"] },
+    { "id": "verify-email", "type": "enrich", "capability": "email_verification", "profiles": ["full"] },
     { "id": "review", "type": "review_gate" },
     { "id": "export", "type": "export", "format": "csv" }
   ]

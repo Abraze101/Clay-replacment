@@ -13,11 +13,13 @@ import { profileSchema } from "../engine/workflow-schema/steps.js";
 
 export type {
   PreviewResult,
+  ResultPhone,
   RunItemResult,
   RunListItem,
   RunOptions,
   RunStatusSummary,
 } from "../app/run-service.js";
+export type { SuppressionScope } from "../storage/database-types.js";
 export type { WorkflowSummary } from "../app/workflow-service.js";
 export type { Confidence, FieldSuggestion, InterpretedRequest } from "../app/request-interpreter.js";
 export type { CapabilityOverrides } from "../engine/workflow-schema/overrides.js";
@@ -110,7 +112,7 @@ export const resumeBodySchema = z
 
 export const reviewBodySchema = z
   .object({
-    decision: z.enum(["approved", "rejected"]),
+    decision: z.enum(["approved", "rejected", "regenerate"]),
     itemIds: z.array(z.string()).min(1).optional(),
     all: z.boolean().optional(),
   })
@@ -125,10 +127,30 @@ export const createWorkflowBodySchema = z.union([
         "local-business-quick-list",
         "professional-executive",
         "imported-list-enrich",
+        "call-ready-continuation",
       ]),
     })
     .strict(),
 ]);
+
+/** M5 suppression management (entity-specific do-not-contact list). */
+export const suppressionBodySchema = z
+  .object({
+    scope: z.enum(["phone", "email", "domain", "lead"]),
+    value: z.string().min(1).max(320),
+    reason: z.string().min(1).max(500),
+  })
+  .strict();
+
+export interface SuppressionEntry {
+  id: string;
+  scope: string;
+  normalizedValue: string;
+  reason: string;
+  requestedBy: string;
+  createdAt: string | null;
+  releasedAt: string | null;
+}
 
 export const exportBodySchema = z.object({ force: z.boolean().optional() }).strict();
 

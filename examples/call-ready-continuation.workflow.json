@@ -1,0 +1,22 @@
+{
+  "id": "call-ready-continuation",
+  "version": 1,
+  "name": "Continue approved leads into Call-Ready",
+  "description": "M5 continuation: take a prior run's APPROVED leads (inputs.continueFromRunId — no re-sourcing, zero source credits), discover direct/mobile phones and validate them for call_ready; full adds email discovery + verification. Contact work the leads already carry is skipped, never re-paid. Review and export the call-ready set.",
+  "inputs": {
+    "limit": 100,
+    "enrichmentProfile": "call_ready"
+  },
+  "steps": [
+    { "id": "continue", "type": "source", "provider": "run-continuation" },
+    { "id": "normalize", "type": "normalize" },
+    { "id": "dedupe", "type": "dedupe" },
+    { "id": "find-phones", "type": "enrich", "capability": "phone_discovery", "profiles": ["call_ready", "full"] },
+    { "id": "validate-phones", "type": "enrich", "capability": "phone_validation", "profiles": ["call_ready", "full"] },
+    { "id": "find-email", "type": "enrich", "capability": "email_discovery", "profiles": ["full"] },
+    { "id": "verify-email", "type": "enrich", "capability": "email_verification", "profiles": ["full"] },
+    { "id": "call-notes", "type": "generate", "template": "call-notes", "profiles": ["call_ready", "full"] },
+    { "id": "review", "type": "review_gate" },
+    { "id": "export", "type": "export", "format": "csv" }
+  ]
+}

@@ -24,6 +24,7 @@ import {
   startRun,
   type RunOptions,
 } from "../app/run-service.js";
+import { listActiveSuppressions, releaseSuppressionById, suppress } from "../app/suppression-service.js";
 import { loadTemplateDefinition, templateIds } from "../app/template-service.js";
 import { IMPORT_MAX_BYTES } from "../engine/import/csv-import.js";
 import type { Profile } from "../engine/workflow-schema/steps.js";
@@ -90,6 +91,7 @@ interface RunFlagOptions {
   cap?: string;
   budget?: string;
   importCsv?: string;
+  continueFrom?: string;
 }
 
 async function toRunOptions(flags: RunFlagOptions): Promise<RunOptions> {
@@ -106,8 +108,13 @@ async function toRunOptions(flags: RunFlagOptions): Promise<RunOptions> {
     }
     importCsv = await readFile(flags.importCsv, "utf8");
   }
+  const baseInputs = flags.inputs ? ((await readJsonFile(flags.inputs)) as Record<string, unknown>) : undefined;
+  // --continue-from is sugar for inputs.continueFromRunId (selected-lead
+  // continuation): the engine resolves the prior run's APPROVED leads at
+  // preview and binds them into the approval scope.
+  const inputs = flags.continueFrom ? { ...(baseInputs ?? {}), continueFromRunId: flags.continueFrom } : baseInputs;
   return {
-    inputs: flags.inputs ? ((await readJsonFile(flags.inputs)) as Record<string, unknown>) : undefined,
+    inputs,
     profile: flags.profile as Profile | undefined,
     overrides: parseInlineJson(flags.overrides, "--overrides"),
     cap: flags.cap !== undefined ? Number(flags.cap) : undefined,
@@ -252,6 +259,10 @@ const runFlagDefs = (c: Command): Command =>
     .option(
       "--import-csv <path>",
       "CSV file for imported-list workflows (≤512 KiB, ≤500 rows); pass the same file to preview and start",
+    )
+    .option(
+      "--continue-from <runId>",
+      "continue a prior run's APPROVED leads (run-continuation workflows); re-sources nothing and binds the selection into the approval",
     );
 
 runFlagDefs(runCmd.command("preview <workflow>"))
@@ -322,10 +333,18 @@ runCmd
       return {
         data: results,
         summary: `${results.length} item(s).`,
-        humanLines: results.map(
-          (r) =>
-            `  #${r.position} ${r.business?.name ?? r.sourceKey} [${r.status}${r.skipReason ? `:${r.skipReason}` : ""}] review=${r.reviewStatus}${r.score !== null ? ` score=${r.score}` : ""}${r.owner ? ` owner=${r.owner.name}` : ""} (${r.runItemId})`,
-        ),
+        humanLines: results.map((r) => {
+          const bestPhone = r.phones.find((p) => !p.suppressed && p.e164);
+          const contactBits = [
+            r.callReadinessStatus ? `readiness=${r.callReadinessStatus}` : "",
+            bestPhone ? `phone=${bestPhone.role}:${bestPhone.e164} [${bestPhone.validationLevel}]` : "",
+            r.email?.address ? `email=${r.email.address} [${r.email.status ?? "not_checked"}]` : "",
+            r.suppressed ? "SUPPRESSED" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          return `  #${r.position} ${r.business?.name ?? r.sourceKey} [${r.status}${r.skipReason ? `:${r.skipReason}` : ""}] review=${r.reviewStatus}${r.score !== null ? ` score=${r.score}` : ""}${r.owner ? ` owner=${r.owner.name}` : ""}${contactBits ? ` ${contactBits}` : ""} (${r.runItemId})`;
+        }),
       };
     })();
   });
@@ -334,21 +353,30 @@ runCmd
   .command("review <runId>")
   .option("--approve", "approve items")
   .option("--reject", "reject items")
+  .option("--regenerate", "mark items for copy regeneration (run retry re-runs their generate step, free)")
   .option("--item <runItemId...>", "specific run item ids")
   .option("--all", "apply to all non-skipped items (explicit)")
   .description("apply review decisions to run items")
-  .action(async (runId: string, opts: { approve?: boolean; reject?: boolean; item?: string[]; all?: boolean }) => {
-    await run(async (app) => {
-      if (Boolean(opts.approve) === Boolean(opts.reject)) {
-        throw new AppError("VALIDATION_FAILED", "Pass exactly one of --approve or --reject.", {});
-      }
-      const result = await reviewRun(app, runId, {
-        reviewStatus: opts.approve ? "approved" : "rejected",
-        itemIds: opts.all ? "all" : (opts.item ?? []),
-      });
-      return { data: result, summary: `${result.updated} item(s) ${opts.approve ? "approved" : "rejected"}.` };
-    })();
-  });
+  .action(
+    async (runId: string, opts: { approve?: boolean; reject?: boolean; regenerate?: boolean; item?: string[]; all?: boolean }) => {
+      await run(async (app) => {
+        const picked = [opts.approve, opts.reject, opts.regenerate].filter(Boolean).length;
+        if (picked !== 1) {
+          throw new AppError("VALIDATION_FAILED", "Pass exactly one of --approve, --reject, or --regenerate.", {});
+        }
+        const decision = opts.approve ? "approved" : opts.reject ? "rejected" : "regenerate";
+        const result = await reviewRun(app, runId, {
+          reviewStatus: decision,
+          itemIds: opts.all ? "all" : (opts.item ?? []),
+        });
+        return {
+          data: result,
+          summary: `${result.updated} item(s) ${decision}.`,
+          humanLines: decision === "regenerate" ? [`Re-run generation with: leads run retry ${runId}`] : [],
+        };
+      })();
+    },
+  );
 
 runCmd
   .command("resume <runId>")
@@ -405,6 +433,64 @@ lead
         itemIds: [runItemId],
       });
       return { data: result, summary: `${result.updated} item ${opts.approve ? "approved" : "rejected"}.` };
+    })();
+  });
+
+// --------------------------------------------------------------------------- suppression
+const suppression = program.command("suppression").description("entity-specific do-not-contact list (applied before every call-ready export)");
+
+suppression
+  .command("add")
+  .requiredOption("--scope <scope>", "phone | email | domain | lead")
+  .requiredOption("--value <value>", "phone number, email, domain, or lead id (normalized on save)")
+  .requiredOption("--reason <text>", "why this entity must not be contacted")
+  .description("suppress a phone, email, domain, or lead; re-adding an active value is a no-op")
+  .action(async (opts: { scope: string; value: string; reason: string }) => {
+    await run(async (app) => {
+      const row = await suppress(app, {
+        scope: opts.scope as "phone" | "email" | "domain" | "lead",
+        value: opts.value,
+        reason: opts.reason,
+      });
+      return {
+        data: row,
+        summary: `Suppressed ${row.scope}:${row.normalized_value} (${row.id}). Applied live at export time; readiness recomputes on the next capability step.`,
+      };
+    })();
+  });
+
+suppression
+  .command("release <id>")
+  .description("release a suppression (an update, never a delete; the value can be re-suppressed later)")
+  .action(async (id: string) => {
+    await run(async (app) => {
+      const released = await releaseSuppressionById(app, id);
+      if (!released) {
+        throw new AppError("NOT_FOUND", `Suppression '${id}' not found or already released.`, { id });
+      }
+      return { data: { id, released: true }, summary: `Suppression ${id} released.` };
+    })();
+  });
+
+suppression
+  .command("list")
+  .option("--scope <scope>", "filter: phone | email | domain | lead")
+  .option("--include-released", "include released history")
+  .description("list suppressions")
+  .action(async (opts: { scope?: string; includeReleased?: boolean }) => {
+    await run(async (app) => {
+      const rows = await listActiveSuppressions(app, {
+        scope: opts.scope as "phone" | "email" | "domain" | "lead" | undefined,
+        includeReleased: Boolean(opts.includeReleased),
+      });
+      return {
+        data: rows,
+        summary: `${rows.length} suppression(s).`,
+        humanLines: rows.map(
+          (r) =>
+            `  ${r.id} ${r.scope}:${r.normalized_value} — ${r.reason} (by ${r.requested_by}${r.released_at ? "; RELEASED" : ""})`,
+        ),
+      };
     })();
   });
 

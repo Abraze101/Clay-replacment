@@ -55,7 +55,7 @@ test("e2e: the full CLI flow survives process exits between every command", { ti
     );
     assert.equal(status.data.status, "waiting_review");
     assert.equal(status.data.counts.items, 15);
-    assert.equal(status.data.creditsUsed, 11);
+    assert.equal(status.data.creditsUsed, 32);
 
     const reviewed = parse<{ updated: number }>((await cli("run", "review", runId, "--approve", "--all")).stdout);
     assert.equal(reviewed.data.updated, 11);
@@ -69,10 +69,11 @@ test("e2e: the full CLI flow survives process exits between every command", { ti
     const exported = parse<{ filePath: string; rowCount: number; noop: boolean }>(
       (await cli("export", "csv", runId)).stdout,
     );
-    assert.equal(exported.data.rowCount, 9);
+    // fx-015's only phone is format-invalid: excluded from the call-ready selection.
+    assert.equal(exported.data.rowCount, 8);
     assert.ok(existsSync(exported.data.filePath));
     const lines = readFileSync(exported.data.filePath, "utf8").trimEnd().split("\r\n");
-    assert.equal(lines.length, 10);
+    assert.equal(lines.length, 9);
 
     // A scope change is rejected by a fresh process too (the full-profile
     // token cannot start call_ready, even before its consumption is checked).

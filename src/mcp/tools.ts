@@ -134,7 +134,9 @@ const runOptionsShape = {
   inputs: z
     .record(z.string(), z.unknown())
     .optional()
-    .describe("Run inputs merged over the workflow's defaults (e.g. businessType, locations, limit, personTitles)."),
+    .describe(
+      "Run inputs merged over the workflow's defaults (e.g. businessType, locations, limit, personTitles). Selected-lead continuation: pass inputs.continueFromRunId (a prior run id) on a run-continuation workflow — the engine resolves that run's APPROVED leads at preview, binds them into the approval, and re-sources nothing.",
+    ),
   profile: profileSchema.optional().describe("Enrichment profile: quick_list, call_ready, or full."),
   overrides: overridesSchema.optional().describe("Typed per-capability overrides; bound into the approval scope."),
   cap: z.number().int().min(0).max(100).optional().describe("Paid record cap (hard maximum 100 per run)."),
@@ -399,7 +401,7 @@ export function registerTools(server: McpServer, getApp: () => AppContainer): vo
     {
       title: "Retry failed items",
       description:
-        "Requeue failed steps/items and continue the run. Steps in needs_review (possibly-completed paid calls) are never auto-retried.",
+        "Requeue failed steps/items and continue the run; also re-runs generation for items marked 'regenerate' (free). Steps in needs_review (possibly-completed paid calls) are never auto-retried.",
       inputSchema: { runId: runIdField },
       outputSchema: envelopeShape,
       annotations: mutating,
@@ -422,10 +424,10 @@ export function registerTools(server: McpServer, getApp: () => AppContainer): vo
     {
       title: "Review leads",
       description:
-        "Approve or reject run items at the review gate or after completion. Pass itemIds for specific leads or all=true for every non-skipped item.",
+        "Approve, reject, or mark run items for copy regeneration at the review gate or after completion. Pass itemIds for specific leads or all=true for every non-skipped item. 'regenerate' re-runs the item's generate step on the next run_retry (free) and returns it to 'unreviewed'.",
       inputSchema: {
         runId: runIdField,
-        decision: z.enum(["approved", "rejected"]),
+        decision: z.enum(["approved", "rejected", "regenerate"]),
         itemIds: z.array(z.string()).min(1).optional().describe("Specific run item ids."),
         all: z.boolean().optional().describe("Apply to all non-skipped items (explicit)."),
       },

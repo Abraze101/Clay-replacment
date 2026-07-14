@@ -26,6 +26,17 @@ const stepId = z
   .describe("unique step id");
 const profiles = z.array(profileSchema).min(1).optional();
 
+/** M5 contact-capability step values. Cross-field rules live in the workflow superRefine. */
+export const contactCapabilitySchema = z.enum([
+  "phone_discovery",
+  "phone_validation",
+  "email_discovery",
+  "email_verification",
+]);
+export type StepContactCapability = z.infer<typeof contactCapabilitySchema>;
+
+export const phoneSignalSchema = z.enum(["line_type", "line_status", "identity_match"]);
+
 const sourceStep = z.object({ id: stepId, type: z.literal("source"), provider: z.string().min(1) }).strict();
 const normalizeStep = z.object({ id: stepId, type: z.literal("normalize") }).strict();
 const dedupeStep = z.object({ id: stepId, type: z.literal("dedupe") }).strict();
@@ -33,7 +44,16 @@ const enrichStep = z
   .object({
     id: stepId,
     type: z.literal("enrich"),
-    provider: z.string().min(1),
+    /**
+     * Named provider (classic enrich) OR a pin for a capability step. A
+     * capability step without a provider resolves from the registry; a
+     * non-capability enrich step REQUIRES a provider (workflow superRefine).
+     */
+    provider: z.string().min(1).optional(),
+    /** M5: which contact capability this step performs (visible typed step). */
+    capability: contactCapabilitySchema.optional(),
+    /** phone_validation only: paid signal packages to request (default line_type + line_status). */
+    signals: z.array(phoneSignalSchema).min(1).optional(),
     optional: z.boolean().optional(),
     profiles,
   })
@@ -44,7 +64,14 @@ const researchStep = z
   .strict();
 const scoreStep = z.object({ id: stepId, type: z.literal("score"), template: z.string().min(1), profiles }).strict();
 const generateStep = z
-  .object({ id: stepId, type: z.literal("generate"), template: z.string().min(1), profiles })
+  .object({
+    id: stepId,
+    type: z.literal("generate"),
+    template: z.string().min(1),
+    /** Optional model-provider pin; default resolves from GENERATE_MODEL_PROVIDER (M5). */
+    provider: z.string().min(1).optional(),
+    profiles,
+  })
   .strict();
 const reviewGateStep = z.object({ id: stepId, type: z.literal("review_gate") }).strict();
 const exportStep = z.object({ id: stepId, type: z.literal("export"), format: z.literal("csv") }).strict();

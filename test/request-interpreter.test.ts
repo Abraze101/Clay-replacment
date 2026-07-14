@@ -41,13 +41,14 @@ test("interpreter: numbers inside location context are not stolen as the limit",
   assert.equal(result.suggestions.enrichmentProfile?.value, "quick_list");
 });
 
-test("interpreter: calling keywords suggest call_ready; owner/phone hints become overrides with M5 notes", () => {
+test("interpreter: calling keywords suggest call_ready; owner/phone hints become live overrides", () => {
   const result = interpretRequest("Build a cold-calling list of HVAC contractors near Phoenix, AZ; find the owner and mobile numbers");
   assert.equal(result.suggestions.enrichmentProfile?.value, "call_ready");
   assert.equal(result.suggestions.businessType?.value, "HVAC contractor");
   assert.equal(result.suggestions.overrides?.value.findOwner, true);
   assert.equal(result.suggestions.overrides?.value.requireDirectPhone, true);
-  assert.ok(result.notes.some((n) => n.includes("requireDirectPhone") && n.includes("Milestone 5")));
+  // Since M5 the overrides gate real capability steps — no placeholder notes.
+  assert.ok(!result.notes.some((n) => n.includes("Milestone 5")));
 });
 
 test("interpreter: verified-email wording sets find AND validate email", () => {

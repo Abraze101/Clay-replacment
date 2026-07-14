@@ -21,7 +21,8 @@ test("happy path: full profile runs to review, resumes to completion, and export
     assert.equal(mid.counts.identityConflicts, 3);
     assert.equal(mid.counts.failed, 1);
     assert.equal(mid.counts.stepsNeedingReview, 1);
-    assert.equal(mid.creditsUsed, 11);
+    // 11 enrich + 18 phone validation (9 mains × 2) + 3 email verification.
+    assert.equal(mid.creditsUsed, 32);
 
     await reviewRun(t.app, run.id, { reviewStatus: "approved", itemIds: "all" });
     const finished = await resumeRun(t.app, run.id, {});
@@ -42,21 +43,32 @@ test("happy path: full profile runs to review, resumes to completion, and export
     assert.ok(scored.length >= 9);
     assert.equal(results.find((r) => r.sourceKey === "fx-001")?.score, 90);
 
-    // CSV materialized by the in-run export step, 9 data rows.
+    // CSV materialized by the in-run export step: 8 data rows — fx-015's only
+    // phone is format-invalid, so the call-ready selection excludes the row
+    // (retained in the database and in results).
     const csvPath = path.join(t.exportDir, `run-${run.id}.csv`);
     assert.ok(existsSync(csvPath));
     const lines = readFileSync(csvPath, "utf8").trimEnd().split("\r\n");
-    assert.equal(lines.length, 10);
+    assert.equal(lines.length, 9);
 
     // Contact honesty on the enriched lead: business_main + direct + work
-    // email as SEPARATE rows; the discovered email is not_checked.
+    // email as SEPARATE rows. Under the M5 full profile the email was
+    // deliverability-checked ('valid' with provider + timestamp) and the
+    // direct line status-checked — never a bare 'verified' boolean.
     const fx001 = results.find((r) => r.sourceKey === "fx-001");
     const contactPoints = await listContactPoints(t.app.db.kysely, fx001?.leadId as string);
     const roles = contactPoints.map((cp) => `${cp.type}:${cp.role}`).sort();
     assert.deepEqual(roles, ["email:work", "phone:business_main", "phone:direct"]);
     const email = contactPoints.find((cp) => cp.type === "email");
-    assert.equal(email?.email_status, "not_checked");
+    assert.equal(email?.email_status, "valid");
+    assert.equal(email?.email_status_provider, "fake-email-verification");
     assert.equal(email?.format_valid, true);
+    const fx001Lead = await t.app.db.kysely
+      .selectFrom("leads")
+      .select(["verified_email"])
+      .where("id", "=", fx001?.leadId as string)
+      .executeTakeFirstOrThrow();
+    assert.equal(fx001Lead.verified_email, "rita@austinroofpros.com", "a 'valid' result is verified_email's first writer");
 
     // Deterministic rationale persisted with evidence referencing stored rows.
     const outputs = await t.app.db.kysely.selectFrom("generated_outputs").selectAll().execute();

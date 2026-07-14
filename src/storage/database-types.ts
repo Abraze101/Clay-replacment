@@ -138,7 +138,7 @@ export type RunStatus =
   | "completed"
   | "failed"
   | "cancelled";
-export type PauseReason = "credit_cap_reached" | "rate_limited" | "operator";
+export type PauseReason = "credit_cap_reached" | "rate_limited" | "operator" | "awaiting_provider";
 export type EnrichmentProfile = "quick_list" | "call_ready" | "full";
 
 export interface RunsTable {
@@ -197,6 +197,13 @@ export type RunItemStatus = "pending" | "in_progress" | "completed" | "failed" |
 export type SkipReason = "filtered" | "identity_conflict";
 export type DedupeStatus = "new" | "matched" | "conflict";
 export type ReviewStatus = "unreviewed" | "approved" | "rejected" | "regenerate";
+/**
+ * Deterministic call-readiness policy result (0005_m5). NULL on the column
+ * means no contact-capability step ever ran for the item (e.g. quick_list);
+ * 'unchecked' means capability steps ran but the requested checks were not
+ * performed for this item. Unknown is never treated as cleared.
+ */
+export type CallReadinessStatus = "ready" | "uncertain" | "invalid" | "suppressed" | "unchecked";
 
 export interface RunItemsTable {
   id: Generated<string>;
@@ -212,6 +219,8 @@ export interface RunItemsTable {
   review_status: WithDefault<ReviewStatus>;
   reviewed_at: TimestampColumn | null;
   review_actor: string | null;
+  call_readiness_status: CallReadinessStatus | null;
+  call_readiness_reason: string | null;
   snapshot: JsonColumn<JsonObject>;
   last_error: JsonColumn<JsonObject> | null;
   created_at: GeneratedTimestamp;
@@ -347,7 +356,7 @@ export interface ContactPointChecksTable {
   checked_at: GeneratedTimestamp;
 }
 
-export type OutputKind = "score_rationale" | "fit_summary" | "opener";
+export type OutputKind = "score_rationale" | "fit_summary" | "opener" | "call_notes";
 
 export interface GeneratedOutputsTable {
   id: Generated<string>;
@@ -417,6 +426,28 @@ export interface IdentityConflictsTable {
   resolved_at: TimestampColumn | null;
 }
 
+export type SuppressionScope = "phone" | "email" | "domain" | "lead";
+
+/**
+ * Entity-specific do-not-contact entries (0005_m5). normalized_value is the
+ * already-normalized identity form: E.164 for phone, lowercase for email,
+ * registrable domain for domain, lead uuid as text for lead. Release is an
+ * UPDATE (released_at/released_by), never a DELETE — the partial unique index
+ * on active rows lets a released value be re-suppressed as a fresh row.
+ * suppression_status in exports is computed live at export time, never stored.
+ */
+export interface SuppressionsTable {
+  id: Generated<string>;
+  agency_id: string;
+  scope: SuppressionScope;
+  normalized_value: string;
+  reason: string;
+  requested_by: string;
+  created_at: GeneratedTimestamp;
+  released_at: TimestampColumn | null;
+  released_by: string | null;
+}
+
 export interface SchemaMigrationsTable {
   id: string;
   checksum: string;
@@ -440,6 +471,7 @@ export interface Database {
   generated_outputs: GeneratedOutputsTable;
   exports: ExportsTable;
   identity_conflicts: IdentityConflictsTable;
+  suppressions: SuppressionsTable;
   schema_migrations: SchemaMigrationsTable;
 }
 

@@ -71,10 +71,12 @@ export class PgBossRunWorker implements JobQueue {
     }
   }
 
-  /** The work handler body: auto-resume a due rate-limit pause, then run to boundary. */
+  /** The work handler body: auto-resume a due provider-side pause (rate limit or async vendor job), then run to boundary. */
   private async execute(runId: string): Promise<void> {
+    const providerWait = (reason: string | null): boolean =>
+      reason === "rate_limited" || reason === "awaiting_provider";
     const before = await getRun(this.db.kysely, runId);
-    if (before.status === "paused" && before.pause_reason === "rate_limited") {
+    if (before.status === "paused" && providerWait(before.pause_reason)) {
       if (before.resume_at !== null && new Date(before.resume_at) > new Date()) {
         // Not due yet (defensive): reschedule and let this delivery complete.
         await this.boss.send(QUEUE, { runId }, { singletonKey: runId, startAfter: new Date(before.resume_at) });
@@ -86,7 +88,7 @@ export class PgBossRunWorker implements JobQueue {
 
     try {
       const run = await executeRun(this.deps, runId);
-      if (run.status === "paused" && run.pause_reason === "rate_limited" && run.resume_at !== null) {
+      if (run.status === "paused" && providerWait(run.pause_reason) && run.resume_at !== null) {
         await this.boss.send(QUEUE, { runId }, { singletonKey: runId, startAfter: new Date(run.resume_at) });
       }
     } catch (err) {
@@ -112,13 +114,13 @@ export class PgBossRunWorker implements JobQueue {
     }
   }
 
-  /** On startup, enqueue rate-limit pauses whose resume_at has already arrived. */
+  /** On startup, enqueue provider-side pauses (rate limit / async vendor job) whose resume_at has already arrived. */
   private async sweep(): Promise<void> {
     const due = await this.db.kysely
       .selectFrom("runs")
       .select("id")
       .where("status", "=", "paused")
-      .where("pause_reason", "=", "rate_limited")
+      .where("pause_reason", "in", ["rate_limited", "awaiting_provider"])
       .where("resume_at", "<=", new Date())
       .execute();
     for (const row of due) {

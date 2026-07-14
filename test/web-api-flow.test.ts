@@ -17,7 +17,7 @@ import type {
 import { createTestApp } from "./helpers/setup.js";
 import { pollRunStatus, startTestWebServer } from "./helpers/web.js";
 
-test("web api: templates endpoint lists the four built-ins; an imported run works over HTTP with pasted CSV", async () => {
+test("web api: templates endpoint lists the five built-ins; an imported run works over HTTP with pasted CSV", async () => {
   const t = await createTestApp();
   const web = await startTestWebServer(t);
   try {
@@ -25,7 +25,13 @@ test("web api: templates endpoint lists the four built-ins; an imported run work
     assert.equal(templates.status, 200);
     assert.deepEqual(
       templates.body.data?.templates.map((tpl) => tpl.id).sort(),
-      ["imported-list-enrich", "local-business-quick-list", "local-service-demo", "professional-executive"],
+      [
+        "call-ready-continuation",
+        "imported-list-enrich",
+        "local-business-quick-list",
+        "local-service-demo",
+        "professional-executive",
+      ],
     );
     assert.equal(
       templates.body.data?.templates.find((tpl) => tpl.id === "imported-list-enrich")?.sourceProvider,
@@ -70,8 +76,10 @@ test("web api: the full happy path works over HTTP — seed, preview, start, rev
     assert.equal(reseeded.status, 200);
     assert.equal(reseeded.body.data?.created, false);
 
-    // Preview issues the plan and a single-use approval token; nothing runs yet.
-    const options = { profile: "full", cap: 10, budget: 10 };
+    // Preview issues the plan and a single-use approval token; nothing runs
+    // yet. Budget covers the full M5 chain: owner 1 + validation 2 + email
+    // verification 1 per record × cap 10.
+    const options = { profile: "full", cap: 10, budget: 40 };
     const preview = await web.postJson<PreviewResult>("/api/workflows/local-service-demo/preview", options);
     assert.equal(preview.status, 200);
     const plan = preview.body.data?.plan;
@@ -149,7 +157,10 @@ test("web api: the full happy path works over HTTP — seed, preview, start, rev
     const approvedCompleted = await web.getJson<ResultsPage<RunItemResult>>(
       `/api/runs/${runId}/results?reviewStatus=approved&status=completed&limit=200`,
     );
-    assert.equal(exportData.rowCount, approvedCompleted.body.data?.items.length);
+    // The call-ready selection may exclude readiness-invalid rows (kept in
+    // results), so the export never exceeds the approved+completed set.
+    const approvedCount = approvedCompleted.body.data?.items.length ?? 0;
+    assert.ok(exportData.rowCount <= approvedCount && exportData.rowCount > 0);
 
     const download = await fetch(web.baseUrl + exportData.downloadUrl);
     assert.equal(download.status, 200);

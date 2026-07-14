@@ -24,6 +24,15 @@ export const workflowInputsSchema = z
      * in a workflow template.
      */
     importRows: z.array(importRowSchema).max(500).optional(),
+    /**
+     * Selected-lead continuation (M5): continue the prior run's approved rows
+     * into deeper enrichment. The lead-id set is resolved from durable review
+     * state at preview and bound into the plan hash (the importRows pattern) —
+     * a review flip between preview and start invalidates the approval.
+     * Per-run inputs — never stored in a workflow template.
+     */
+    continueFromRunId: z.uuid().optional(),
+    continuationLeadIds: z.array(z.uuid()).max(500).optional(),
   })
   .strict();
 
@@ -61,6 +70,52 @@ export const workflowDefinitionSchema = z
     }
     if (exportIdx >= 0 && exportIdx !== types.length - 1) {
       ctx.addIssue({ code: "custom", message: "export must be the last step", path: ["steps"] });
+    }
+    // M5 contact-capability rules: enrich steps need a provider OR a
+    // capability; signals belong to phone_validation only; at most one step
+    // per capability; discovery precedes its validation/verification channel.
+    const capabilityIdx = new Map<string, number>();
+    def.steps.forEach((step, idx) => {
+      if (step.type !== "enrich") return;
+      if (!step.provider && !step.capability) {
+        ctx.addIssue({
+          code: "custom",
+          message: "an enrich step needs a provider, a capability, or both",
+          path: ["steps", idx],
+        });
+      }
+      if (step.signals && step.capability !== "phone_validation") {
+        ctx.addIssue({
+          code: "custom",
+          message: "signals apply only to capability 'phone_validation'",
+          path: ["steps", idx],
+        });
+      }
+      if (step.capability) {
+        if (capabilityIdx.has(step.capability)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `duplicate capability '${step.capability}' — one step per capability`,
+            path: ["steps", idx],
+          });
+        } else {
+          capabilityIdx.set(step.capability, idx);
+        }
+      }
+    });
+    for (const [discovery, check] of [
+      ["phone_discovery", "phone_validation"],
+      ["email_discovery", "email_verification"],
+    ] as const) {
+      const d = capabilityIdx.get(discovery);
+      const c = capabilityIdx.get(check);
+      if (d !== undefined && c !== undefined && d > c) {
+        ctx.addIssue({
+          code: "custom",
+          message: `'${discovery}' must precede '${check}'`,
+          path: ["steps", d],
+        });
+      }
     }
   });
 

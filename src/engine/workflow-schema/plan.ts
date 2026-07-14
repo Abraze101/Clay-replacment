@@ -1,26 +1,68 @@
 import { checksumOf } from "../../shared/checksum.js";
 import { AppError } from "../../shared/errors.js";
+import { GENERATION_TEMPLATES } from "../generation/templates.js";
 import { SCORE_TEMPLATES } from "../scoring/templates.js";
 import type { EstimatedPaidAction } from "../../storage/database-types.js";
-import type { ProviderRegistry } from "../../providers/types.js";
-import { isPagedPaidSource } from "../../providers/types.js";
-import type { CapabilityOverrides } from "./overrides.js";
-import { M5_ONLY_OVERRIDES } from "./overrides.js";
-import type { Profile, WorkflowStep } from "./steps.js";
+import type {
+  ContactDiscoveryProvider,
+  EmailVerificationProvider,
+  PhoneSignal,
+  PhoneValidationProvider,
+  ProviderRegistry,
+} from "../../providers/types.js";
+import { discoveryCostPerRecord, isPagedPaidSource, validationCostPerRecord } from "../../providers/types.js";
+import type { CapabilityOverrides, ContactCapabilityName } from "./overrides.js";
+import { CAPABILITY_OVERRIDES } from "./overrides.js";
+import type { EnrichStep, Profile, WorkflowStep } from "./steps.js";
 import type { WorkflowDefinition, WorkflowInputs } from "./workflow.js";
 import { workflowInputsSchema } from "./workflow.js";
 
 /** Initial hard cap: at most 100 paid records per run (product requirement). */
 export const MAX_PAID_RECORDS = 100;
 
+/** Default paid signal packages for a phone_validation step without explicit `signals`. */
+export const DEFAULT_PHONE_SIGNALS: readonly PhoneSignal[] = ["line_type", "line_status"];
+
+/** Sources whose records are known to carry phone numbers (validation without discovery is sensible). */
+const PHONE_BEARING_SOURCES = new Set(["local-business", "imported-list", "fake-places", "run-continuation"]);
+/** Sources whose records may carry emails (imported rows and continuation snapshots only). */
+const EMAIL_BEARING_SOURCES = new Set(["imported-list", "run-continuation"]);
+
+/**
+ * skipPersonalization turns off personalization templates only: a Call-Ready
+ * run may skip openers but still wants grounded call notes. The template
+ * registry (generation/templates.ts) says which is which.
+ */
+function isPersonalizationTemplate(name: string): boolean {
+  return GENERATION_TEMPLATES.get(name)?.isPersonalization ?? true;
+}
+
 export interface PlannedStep {
   id: string;
   type: WorkflowStep["type"];
   provider?: string;
+  /** M5 contact-capability steps carry which capability they perform. */
+  capability?: ContactCapabilityName;
   paid: boolean;
   costPerRecord: number;
   willRun: boolean;
   excludedBy?: "profile" | "override";
+  /** Preview honesty: this step runs ONLY because an override forced it in. */
+  includedBy?: "override";
+}
+
+/**
+ * Deterministic policy parameters derived from overrides + planned steps and
+ * persisted with the plan so the runner and call-readiness policy never
+ * re-derive them. Covered by the plan hash via `overrides` + `profile`.
+ */
+export interface PlanPolicy {
+  requireDirectPhone: boolean;
+  acceptBusinessMainPhone: boolean;
+  acceptCatchAllEmail: boolean;
+  /** True when a phone_validation step will run (drives 'unchecked' vs NULL readiness). */
+  phoneValidationRequested: boolean;
+  emailVerificationRequested: boolean;
 }
 
 export interface ResolvedPlan {
@@ -29,6 +71,7 @@ export interface ResolvedPlan {
   inputs: WorkflowInputs;
   overrides: CapabilityOverrides;
   steps: PlannedStep[];
+  policy: PlanPolicy;
   sourceLimit: number;
   paidRecordCap: number;
   creditLimit: number;
@@ -37,6 +80,61 @@ export interface ResolvedPlan {
   warnings: string[];
   planHash: string;
 }
+
+export type ResolvedCapabilityProvider =
+  | { kind: "phone_validation"; provider: PhoneValidationProvider }
+  | { kind: "email_verification"; provider: EmailVerificationProvider }
+  | { kind: "discovery"; provider: ContactDiscoveryProvider };
+
+/**
+ * Resolve the provider serving a capability step: the pinned name when the
+ * step names one, else the sole configured provider for that capability.
+ * Returns undefined when nothing is configured (ADR-031: selection without a
+ * key leaves the capability empty so this surfaces at plan time).
+ */
+export function resolveCapabilityProvider(
+  registry: ProviderRegistry,
+  capability: ContactCapabilityName,
+  pinned?: string,
+): ResolvedCapabilityProvider | undefined {
+  const pick = <T>(map: Map<string, T>): T | undefined => {
+    if (pinned) return map.get(pinned);
+    return map.values().next().value;
+  };
+  if (capability === "phone_validation") {
+    const provider = pick(registry.phoneValidation);
+    return provider ? { kind: "phone_validation", provider } : undefined;
+  }
+  if (capability === "email_verification") {
+    const provider = pick(registry.emailVerification);
+    return provider ? { kind: "email_verification", provider } : undefined;
+  }
+  const provider = pick(registry.contactDiscovery);
+  return provider ? { kind: "discovery", provider } : undefined;
+}
+
+/** Wanted contact kinds for a discovery-capability step. */
+export function discoveryWantedKinds(capability: "phone_discovery" | "email_discovery"): readonly ("work_email" | "direct_phone" | "mobile_phone")[] {
+  return capability === "phone_discovery" ? ["direct_phone", "mobile_phone"] : ["work_email"];
+}
+
+function capabilityStepCost(step: EnrichStep, resolved: ResolvedCapabilityProvider): number {
+  switch (resolved.kind) {
+    case "phone_validation":
+      return validationCostPerRecord(resolved.provider, step.signals ?? DEFAULT_PHONE_SIGNALS);
+    case "email_verification":
+      return resolved.provider.costPerRecord;
+    case "discovery":
+      return discoveryCostPerRecord(
+        resolved.provider,
+        discoveryWantedKinds(step.capability as "phone_discovery" | "email_discovery"),
+      );
+  }
+}
+
+const OVERRIDE_KEY_BY_CAPABILITY = Object.fromEntries(
+  Object.entries(CAPABILITY_OVERRIDES).map(([key, capability]) => [capability, key]),
+) as Record<ContactCapabilityName, keyof typeof CAPABILITY_OVERRIDES>;
 
 /**
  * Resolve exactly which steps a run will execute for a profile + overrides,
@@ -65,46 +163,93 @@ export function resolvePlan(args: {
   inputs.enrichmentProfile = profile;
   const warnings: string[] = [];
 
+  const continuation =
+    inputs.continueFromRunId && inputs.continuationLeadIds
+      ? { runId: inputs.continueFromRunId, leadIds: inputs.continuationLeadIds }
+      : undefined;
+
   // Per-source planned request counts (paged paid sources only), used to price
   // the source step by search volume rather than by the per-record cap.
   const sourceRequestCounts = new Map<string, number>();
 
   const steps: PlannedStep[] = args.definition.steps.map((step) => {
-    const provider = "provider" in step ? step.provider : undefined;
+    let provider = "provider" in step ? step.provider : undefined;
+    const capability = step.type === "enrich" ? step.capability : undefined;
 
     // Profile/override exclusion FIRST: an excluded step's provider need not
     // be configured (a shipped template referencing an unconfigured live
     // enricher must not block the free quick_list path).
     let willRun = true;
     let excludedBy: PlannedStep["excludedBy"];
+    let includedBy: PlannedStep["includedBy"];
     const profiles = "profiles" in step ? step.profiles : undefined;
     if (profiles && !profiles.includes(profile)) {
       willRun = false;
       excludedBy = "profile";
     }
-    if (willRun && step.type === "generate" && args.overrides.skipPersonalization) {
+    if (willRun && step.type === "generate" && args.overrides.skipPersonalization && isPersonalizationTemplate(step.template)) {
       willRun = false;
       excludedBy = "override";
     }
-    if (willRun && step.type === "enrich" && step.optional && args.overrides.findOwner === false) {
+    if (willRun && step.type === "enrich" && !step.capability && step.optional && args.overrides.findOwner === false) {
       willRun = false;
       excludedBy = "override";
+    }
+    // M5 capability overrides gate their step both ways: `false` excludes a
+    // profile-enabled step; `true` force-includes a profile-excluded one —
+    // except under quick_list, which never runs paid contact steps.
+    if (step.type === "enrich" && step.capability) {
+      const overrideKey = OVERRIDE_KEY_BY_CAPABILITY[step.capability];
+      const overrideValue = args.overrides[overrideKey];
+      if (overrideValue === false && willRun) {
+        willRun = false;
+        excludedBy = "override";
+      } else if (overrideValue === true && !willRun && excludedBy === "profile") {
+        if (profile === "quick_list") {
+          warnings.push(
+            `quick_list enables no paid contact steps; switch to call_ready or full to enable '${overrideKey}'.`,
+          );
+        } else {
+          willRun = true;
+          excludedBy = undefined;
+          includedBy = "override";
+        }
+      }
     }
 
     let paid = step.type === "enrich";
     let costPerRecord = 0;
-    if (step.type === "enrich") {
-      const enricher = args.providers.enrichers.get(step.provider);
+    if (step.type === "enrich" && step.capability) {
+      const resolved = resolveCapabilityProvider(args.providers, step.capability, step.provider);
+      if (!resolved) {
+        if (willRun) {
+          throw new AppError(
+            "VALIDATION_FAILED",
+            `Step '${step.id}' needs a configured '${step.capability}' provider${step.provider ? ` ('${step.provider}')` : ""} — set the capability's provider selection and key (see provider status) or disable the capability.`,
+            { stepId: step.id, capability: step.capability, ...(step.provider ? { provider: step.provider } : {}) },
+          );
+        }
+        warnings.push(
+          `Step '${step.id}' needs an unconfigured '${step.capability}' provider; it is excluded by ${excludedBy ?? "the profile"} and would need configuration to run.`,
+        );
+      } else {
+        provider = resolved.provider.name;
+        costPerRecord = capabilityStepCost(step, resolved);
+      }
+    } else if (step.type === "enrich") {
+      // superRefine guarantees a provider on non-capability enrich steps.
+      const providerName = step.provider ?? "";
+      const enricher = args.providers.enrichers.get(providerName);
       if (!enricher) {
         if (willRun) {
           throw new AppError(
             "VALIDATION_FAILED",
-            `Enrich step '${step.id}' needs provider '${step.provider}', which is not configured — connect it (see provider status) or choose a profile that excludes the step.`,
-            { stepId: step.id, provider: step.provider },
+            `Enrich step '${step.id}' needs provider '${providerName}', which is not configured — connect it (see provider status) or choose a profile that excludes the step.`,
+            { stepId: step.id, provider: providerName },
           );
         }
         warnings.push(
-          `Step '${step.id}' references unconfigured provider '${step.provider}'; it is excluded by ${excludedBy ?? "the profile"} and would need configuration to run.`,
+          `Step '${step.id}' references unconfigured provider '${providerName}'; it is excluded by ${excludedBy ?? "the profile"} and would need configuration to run.`,
         );
       } else {
         costPerRecord = enricher.costPerRecord;
@@ -127,6 +272,7 @@ export function resolvePlan(args: {
         limit: inputs.limit,
         personTitles: inputs.personTitles,
         importRows: inputs.importRows,
+        continuation,
       });
       // A paged paid source (e.g. SerpAPI Maps) is billed per search request;
       // the preview cost derives from the planned request volume. A zero-cost
@@ -138,6 +284,7 @@ export function resolvePlan(args: {
           locations: inputs.locations,
           limit: inputs.limit,
           personTitles: inputs.personTitles,
+          continuation,
         });
         paid = true;
         costPerRecord = est.creditsPerRequest;
@@ -172,13 +319,87 @@ export function resolvePlan(args: {
         template: step.template,
       });
     }
-    return { id: step.id, type: step.type, provider, paid, costPerRecord, willRun, ...(excludedBy ? { excludedBy } : {}) };
+    if (step.type === "generate") {
+      if (!GENERATION_TEMPLATES.has(step.template)) {
+        throw new AppError(
+          "VALIDATION_FAILED",
+          `Generate step '${step.id}' references unknown template '${step.template}'.`,
+          { stepId: step.id, template: step.template },
+        );
+      }
+      if (willRun && args.providers.models.size === 0) {
+        warnings.push(
+          `Generate step '${step.id}' will be SKIPPED: no model provider is configured (generation is optional — sourcing, scoring, and export run without it).`,
+        );
+      }
+    }
+    return {
+      id: step.id,
+      type: step.type,
+      provider,
+      ...(capability ? { capability } : {}),
+      paid,
+      costPerRecord,
+      willRun,
+      ...(excludedBy ? { excludedBy } : {}),
+      ...(includedBy ? { includedBy } : {}),
+    };
   });
 
-  for (const key of M5_ONLY_OVERRIDES) {
-    if (args.overrides[key] !== undefined) {
-      warnings.push(`Override '${key}' is recorded and bound to the approval, but its contact-capability steps arrive at Milestone 5; it changes no M0 step.`);
+  const willRunCapability = (capability: ContactCapabilityName): boolean =>
+    steps.some((s) => s.capability === capability && s.willRun);
+  const hasCapabilityStep = (capability: ContactCapabilityName): boolean =>
+    steps.some((s) => s.capability === capability);
+
+  const requireDirectPhone = args.overrides.requireDirectPhone ?? false;
+  const policy: PlanPolicy = {
+    requireDirectPhone,
+    // A direct/mobile requirement makes a business main line unacceptable by definition.
+    acceptBusinessMainPhone: requireDirectPhone ? false : (args.overrides.acceptBusinessMainPhone ?? true),
+    acceptCatchAllEmail: args.overrides.acceptCatchAllEmail ?? false,
+    phoneValidationRequested: willRunCapability("phone_validation"),
+    emailVerificationRequested: willRunCapability("email_verification"),
+  };
+
+  // Override/step coherence warnings (never silent no-ops).
+  for (const [key, capability] of Object.entries(CAPABILITY_OVERRIDES) as [
+    keyof typeof CAPABILITY_OVERRIDES,
+    ContactCapabilityName,
+  ][]) {
+    if (args.overrides[key] !== undefined && !hasCapabilityStep(capability)) {
+      warnings.push(`Override '${key}' has no ${capability} step in this workflow; it changes nothing.`);
     }
+  }
+  if (args.overrides.requireDirectPhone === true && args.overrides.acceptBusinessMainPhone === true) {
+    warnings.push(
+      "requireDirectPhone conflicts with acceptBusinessMainPhone; the direct/mobile requirement wins and business main lines will not satisfy call-readiness.",
+    );
+  }
+  const sourceStep = args.definition.steps.find((s) => s.type === "source");
+  const sourceProviderName = sourceStep && "provider" in sourceStep ? sourceStep.provider : "";
+  if (
+    willRunCapability("phone_validation") &&
+    !willRunCapability("phone_discovery") &&
+    !PHONE_BEARING_SOURCES.has(sourceProviderName)
+  ) {
+    warnings.push(
+      "phone_validation may find nothing to validate: no phone discovery runs before it and the source may not return phone numbers.",
+    );
+  }
+  if (policy.requireDirectPhone && hasCapabilityStep("phone_discovery") && !willRunCapability("phone_discovery")) {
+    warnings.push(
+      "requireDirectPhone is set but phone discovery is excluded; only source- or import-provided direct/mobile numbers can satisfy it.",
+    );
+  }
+  if (
+    willRunCapability("email_verification") &&
+    !willRunCapability("email_discovery") &&
+    !steps.some((s) => s.type === "enrich" && !s.capability && s.willRun) &&
+    !EMAIL_BEARING_SOURCES.has(sourceProviderName)
+  ) {
+    warnings.push(
+      "email_verification may find nothing to verify: no email discovery or person enrichment runs before it and the source does not return emails.",
+    );
   }
 
   // The per-record cap governs item-level paid work (enrichment) only. A paid
@@ -234,6 +455,7 @@ export function resolvePlan(args: {
     inputs,
     overrides: args.overrides,
     steps,
+    policy,
     sourceLimit: inputs.limit,
     paidRecordCap,
     creditLimit,

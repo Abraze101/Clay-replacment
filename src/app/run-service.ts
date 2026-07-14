@@ -11,7 +11,9 @@ import { exportRun, type ExportResult } from "../engine/export/export-run.js";
 import { parseImportCsv } from "../engine/import/csv-import.js";
 import type { ApprovalEntry, JsonObject, ReviewStatus } from "../storage/database-types.js";
 import { num } from "../storage/database-types.js";
-import { getLead } from "../storage/repositories/lead-repo.js";
+import { getLead, listContactPoints } from "../storage/repositories/lead-repo.js";
+import { latestOutput } from "../storage/repositories/output-repo.js";
+import { findActiveSuppressions } from "../storage/repositories/suppression-repo.js";
 import {
   createRun,
   getRun,
@@ -23,6 +25,7 @@ import {
   passReviewGate,
   requestCancel,
   requeueFailedSteps,
+  requeueRegenerateSteps,
   reviewRunItems,
   setRunStatus,
   type RunRow,
@@ -92,6 +95,36 @@ async function resolvePreview(
     for (const reject of parsed.rejected) {
       importWarnings.push(`import line ${reject.line}: ${reject.reason}`);
     }
+  }
+
+  // Selected-lead continuation (M5): resolve the prior run's APPROVED,
+  // completed leads from durable review state and bind the id set into the
+  // plan hash — preview and start both resolve from the database, so a review
+  // flip in between yields a different hash and APPROVAL_MISMATCH by design.
+  const continueFromRunId = inputs["continueFromRunId"];
+  if (typeof continueFromRunId === "string" && inputs["continuationLeadIds"] === undefined) {
+    const priorRun = await getRun(app.db.kysely, continueFromRunId);
+    if (priorRun.agency_id !== app.agencyId) {
+      throw new AppError("NOT_FOUND", `Run '${continueFromRunId}' not found.`, {});
+    }
+    const approved = await listRunItems(app.db.kysely, continueFromRunId, { reviewStatuses: ["approved"] });
+    const leadIds = approved
+      .filter((i) => i.status === "completed" && i.lead_id !== null)
+      .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
+      .map((i) => i.lead_id as string);
+    if (leadIds.length === 0) {
+      throw new AppError(
+        "VALIDATION_FAILED",
+        `Run '${continueFromRunId}' has no approved, completed leads to continue — review and approve rows first.`,
+        { runId: continueFromRunId },
+      );
+    }
+    // Clamp the limit to the selection so caps and estimates are exact,
+    // unless the caller explicitly narrowed it further.
+    inputs = { ...inputs, continuationLeadIds: leadIds, limit: (inputs["limit"]) ?? leadIds.length };
+    importWarnings.push(
+      `Continuation source: ${leadIds.length} approved row(s) from run ${continueFromRunId} (0 credits — no provider calls).`,
+    );
   }
 
   const plan = resolvePlan({
@@ -294,6 +327,19 @@ export async function listRunSummaries(app: AppContainer, limit = 50): Promise<R
   }));
 }
 
+/** One phone contact point as surfaced to results views (per-signal honesty; never a bare 'verified'). */
+export interface ResultPhone {
+  role: string;
+  e164: string | null;
+  lineType: string | null;
+  lineStatus: string | null;
+  identityMatch: string | null;
+  /** Deepest check performed: none | format | line_status | identity_match. */
+  validationLevel: "none" | "format" | "line_status" | "identity_match";
+  lastCheckedAt: string | null;
+  suppressed: boolean;
+}
+
 export interface RunItemResult {
   runItemId: string;
   position: number;
@@ -304,6 +350,8 @@ export interface RunItemResult {
   reviewStatus: string;
   score: number | null;
   leadId: string | null;
+  callReadinessStatus: string | null;
+  callReadinessReason: string | null;
   business: {
     name: string | null;
     category: string | null;
@@ -312,6 +360,21 @@ export interface RunItemResult {
     businessMainPhone: string | null;
   } | null;
   owner: { name: string; title: string } | null;
+  /** M5 contact detail: one entry per phone contact point, best-first per role ordering. */
+  phones: ResultPhone[];
+  email: {
+    address: string | null;
+    status: string | null;
+    lastCheckedAt: string | null;
+    verifiedEmail: string | null;
+  } | null;
+  /** Latest generated copy per kind (append-only history stays in generated_outputs). */
+  generated: {
+    fitSummary: Record<string, unknown> | null;
+    callNotes: Record<string, unknown> | null;
+    opener: Record<string, unknown> | null;
+  } | null;
+  suppressed: boolean;
 }
 
 export async function runResults(
@@ -328,6 +391,69 @@ export async function runResults(
   for (const item of items) {
     const lead = item.lead_id ? await getLead(app.db.kysely, item.lead_id) : undefined;
     const snapshot = item.snapshot as { enrichment?: { personName?: string; title?: string } };
+    let phones: ResultPhone[] = [];
+    let email: RunItemResult["email"] = null;
+    let generated: RunItemResult["generated"] = null;
+    let suppressed = false;
+    if (lead) {
+      const contactPoints = await listContactPoints(app.db.kysely, lead.id);
+      const matches = await findActiveSuppressions(app.db.kysely, app.agencyId, {
+        phones: contactPoints.filter((cp) => cp.type === "phone" && cp.normalized_value).map((cp) => cp.normalized_value as string),
+        emails: contactPoints.filter((cp) => cp.type === "email" && cp.normalized_value).map((cp) => cp.normalized_value as string),
+        domains: lead.normalized_domain ? [lead.normalized_domain] : [],
+        leadIds: [lead.id],
+      });
+      const suppressedValues = new Set(matches.filter((m) => m.scope === "phone" || m.scope === "email").map((m) => m.normalized_value));
+      suppressed = matches.some((m) => m.scope === "lead" || m.scope === "domain");
+      phones = contactPoints
+        .filter((cp) => cp.type === "phone")
+        .map((cp) => {
+          const level =
+            cp.identity_match_checked_at !== null
+              ? ("identity_match" as const)
+              : cp.line_status_checked_at !== null
+                ? ("line_status" as const)
+                : cp.format_checked_at !== null
+                  ? ("format" as const)
+                  : ("none" as const);
+          const times = [cp.format_checked_at, cp.line_status_checked_at, cp.identity_match_checked_at]
+            .filter((v): v is Date | string => v !== null)
+            .map((v) => new Date(v).getTime());
+          return {
+            role: cp.role,
+            e164: cp.normalized_value,
+            lineType: cp.line_type,
+            lineStatus: cp.line_status,
+            identityMatch: cp.identity_match,
+            validationLevel: level,
+            lastCheckedAt: times.length > 0 ? iso(new Date(Math.max(...times))) : null,
+            suppressed: cp.normalized_value !== null && suppressedValues.has(cp.normalized_value),
+          };
+        });
+      const workEmail = contactPoints.find((cp) => cp.type === "email" && cp.role === "work") ?? contactPoints.find((cp) => cp.type === "email");
+      email = workEmail
+        ? {
+            address: workEmail.normalized_value,
+            status: workEmail.email_status,
+            lastCheckedAt: iso(workEmail.email_status_checked_at),
+            verifiedEmail: lead.verified_email,
+          }
+        : lead.verified_email
+          ? { address: lead.verified_email, status: "valid", lastCheckedAt: null, verifiedEmail: lead.verified_email }
+          : null;
+      const [fitSummary, callNotes, opener] = await Promise.all([
+        latestOutput(app.db.kysely, runId, lead.id, "fit_summary"),
+        latestOutput(app.db.kysely, runId, lead.id, "call_notes"),
+        latestOutput(app.db.kysely, runId, lead.id, "opener"),
+      ]);
+      if (fitSummary || callNotes || opener) {
+        generated = {
+          fitSummary: fitSummary?.content ?? null,
+          callNotes: callNotes?.content ?? null,
+          opener: opener?.content ?? null,
+        };
+      }
+    }
     results.push({
       runItemId: item.id,
       position: item.position,
@@ -338,6 +464,8 @@ export async function runResults(
       reviewStatus: item.review_status,
       score: item.score === null ? null : num(item.score),
       leadId: item.lead_id,
+      callReadinessStatus: item.call_readiness_status,
+      callReadinessReason: item.call_readiness_reason,
       business: lead
         ? {
             name: lead.display_name,
@@ -350,6 +478,10 @@ export async function runResults(
       owner: snapshot.enrichment?.personName
         ? { name: snapshot.enrichment.personName, title: snapshot.enrichment.title ?? "" }
         : null,
+      phones,
+      email,
+      generated,
+      suppressed,
     });
   }
   return results;
@@ -358,7 +490,7 @@ export async function runResults(
 export async function reviewRun(
   app: AppContainer,
   runId: string,
-  decision: { reviewStatus: Extract<ReviewStatus, "approved" | "rejected">; itemIds: string[] | "all" },
+  decision: { reviewStatus: Extract<ReviewStatus, "approved" | "rejected" | "regenerate">; itemIds: string[] | "all" },
 ): Promise<{ updated: number }> {
   const run = await getRun(app.db.kysely, runId);
   if (run.status === "running") {
@@ -466,7 +598,8 @@ export async function prepareResume(
 }
 
 /**
- * Auto-resume a run paused ONLY by a provider rate limit whose resume_at has
+ * Auto-resume a run paused ONLY by a provider-side wait — a rate limit or a
+ * pending async vendor job (awaiting_provider, ADR-029) — whose resume_at has
  * arrived. Never lifts a credit-cap or operator pause — those require explicit
  * operator action / a fresh approval. Budget/cap are unchanged, so no approval
  * token is needed. Used by the job drivers' schedulers (in-process self-heal
@@ -474,7 +607,9 @@ export async function prepareResume(
  */
 export async function autoResumeRun(app: AppContainer, runId: string): Promise<RunRow> {
   const run = await getRun(app.db.kysely, runId);
-  if (run.status !== "paused" || run.pause_reason !== "rate_limited") return run;
+  if (run.status !== "paused" || (run.pause_reason !== "rate_limited" && run.pause_reason !== "awaiting_provider")) {
+    return run;
+  }
   if (run.resume_at !== null && new Date(run.resume_at) > new Date()) return run; // not due yet
   assertRunTransition("paused", "running");
   await setRunStatus(app.db.kysely, runId, "running", { pauseReason: null, resumeAt: null });
@@ -501,7 +636,12 @@ export async function prepareRetry(app: AppContainer, runId: string): Promise<{ 
   // Failed source searches are equally retryable (they cost nothing when they
   // failed; completed/needs_review rows are untouched, so no double-spend).
   const sourceRequeue = await requeueFailedSourceRequests(app.db.kysely, runId);
-  const requeued = requeuedSteps + sourceRequeue.requeued;
+  // M5 regeneration: items marked 'regenerate' re-run their generate steps
+  // (free) and return to 'unreviewed' on success. needs_review stays untouched.
+  const plan = run.resolved_plan as unknown as { steps?: { id: string; type: string; willRun?: boolean }[] };
+  const generateStepIds = (plan.steps ?? []).filter((s) => s.type === "generate").map((s) => s.id);
+  const regenerated = await requeueRegenerateSteps(app.db.kysely, runId, generateStepIds);
+  const requeued = requeuedSteps + sourceRequeue.requeued + regenerated;
   if (requeued === 0) return { run, requeued: 0 };
   // Clear completed markers for re-entry (item steps recompute from the ledger).
   assertRunTransition(run.status, "running");

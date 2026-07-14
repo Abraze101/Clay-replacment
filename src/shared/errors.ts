@@ -58,6 +58,25 @@ export class RateLimitError extends AppError {
 }
 
 /**
+ * An async submit-then-poll vendor accepted a job that is not finished yet
+ * (M5, ADR-029). Not a failure and NOT a spent attempt: the runner persists
+ * the job id, defers the step to `next_attempt_at`, keeps sweeping other
+ * items, and pauses the run `awaiting_provider` until the earliest poll is
+ * due. Crash replay with a persisted job id re-polls — never re-submits.
+ */
+export class PendingProviderJobError extends AppError {
+  readonly jobId: string;
+  readonly retryAfterSeconds: number;
+
+  constructor(message: string, jobId: string, retryAfterSeconds: number, details: Record<string, unknown> = {}) {
+    super("PROVIDER_ERROR", message, details);
+    this.name = "PendingProviderJobError";
+    this.jobId = jobId;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+/**
  * The provider may have completed (and charged) the request but its outcome
  * cannot be confirmed. Never auto-retried; the step lands in `needs_review`.
  */

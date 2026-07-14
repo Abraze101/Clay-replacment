@@ -23,15 +23,23 @@ const PRESETS: { value: Profile; title: string; blurb: string }[] = [
 
 type ToggleKey = Exclude<keyof CapabilityOverrides, "findOwner">;
 
-const TOGGLES: { key: ToggleKey; label: string; m5: boolean }[] = [
-  { key: "findPhones", label: "Find additional phone numbers", m5: true },
-  { key: "validatePhones", label: "Validate phone numbers (line status)", m5: true },
-  { key: "requireDirectPhone", label: "Require a direct/mobile number", m5: true },
-  { key: "acceptBusinessMainPhone", label: "A business main line is fine", m5: true },
-  { key: "findEmail", label: "Find a work email", m5: true },
-  { key: "validateEmail", label: "Validate the email", m5: true },
-  { key: "acceptCatchAllEmail", label: "Accept catch-all/unknown email results", m5: true },
-  { key: "skipPersonalization", label: "Skip personalization", m5: false },
+const TOGGLES: { key: ToggleKey; label: string; help: string }[] = [
+  { key: "findPhones", label: "Find additional phone numbers", help: "paid discovery of direct/mobile numbers for approved rows" },
+  {
+    key: "validatePhones",
+    label: "Validate phone numbers (line status)",
+    help: "checks whether the line is in service — a format-only check is never called verified",
+  },
+  { key: "requireDirectPhone", label: "Require a direct/mobile number", help: "a business main line will not count as call-ready" },
+  { key: "acceptBusinessMainPhone", label: "A business main line is fine", help: "the default for local campaigns" },
+  { key: "findEmail", label: "Find a work email", help: "paid email discovery for approved rows" },
+  {
+    key: "validateEmail",
+    label: "Validate the email",
+    help: "deliverability check; only a 'valid' result ever marks an email verified",
+  },
+  { key: "acceptCatchAllEmail", label: "Accept catch-all email results", help: "catch-all domains count as good enough (never as verified)" },
+  { key: "skipPersonalization", label: "Skip personalization", help: "keeps grounded call notes; skips the personalized opener" },
 ];
 
 /** Step 2: preset + capability toggles; compiles into the same typed run options the engine previews. */
@@ -88,7 +96,7 @@ export function PresetScreen({
               }
             />
             <span>{toggle.label}</span>
-            {toggle.m5 && <span className="chip chip-muted">recorded in your approval — active from Milestone 5</span>}
+            <span className="muted">({toggle.help})</span>
           </label>
         ))}
 

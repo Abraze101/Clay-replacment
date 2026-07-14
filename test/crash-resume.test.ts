@@ -63,12 +63,13 @@ test("crash-resume: fault after provider call, before commit — no double spend
     assert.equal(ownerAfter?.attempt_costs.length, 1);
     assert.equal(num(ownerAfter?.cost_units ?? 0), 1, "charged exactly once");
 
-    // Whole-run reconciliation: provider-side charges == engine cost ledger ==
-    // exactly what an uninterrupted run spends (11 credits, 14 executed calls).
+    // Whole-run reconciliation: enrich provider-side charges (11 credits, 14
+    // executed calls) plus the M5 contact-validation spend (9 validated mains
+    // × 2 + 3 verified enrich emails × 1 = 21) == the engine cost ledger.
     const stats = provider.stats();
     assert.equal(stats.totalCharged, 11);
     assert.equal(stats.executedCalls, 14, "the replayed request was served from the provider cache, not re-executed");
-    assert.equal(num(resumed.credits_used), 11);
+    assert.equal(num(resumed.credits_used), 32);
   } finally {
     await t.teardown();
   }

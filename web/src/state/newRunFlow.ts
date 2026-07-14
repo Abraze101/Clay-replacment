@@ -23,6 +23,12 @@ export interface NewRunFields {
   budget: string;
   /** Pasted CSV text for imported-list workflows; empty = not an import run. */
   importCsv: string;
+  /**
+   * Selected-lead continuation (M5): a prior run id whose APPROVED leads
+   * continue into deeper enrichment. Empty = a normal sourced run. The engine
+   * resolves and binds the selection at preview.
+   */
+  continueFromRunId: string;
 }
 
 export interface RunRequestOptions {
@@ -45,6 +51,7 @@ export const INITIAL_FIELDS: NewRunFields = {
   cap: "",
   budget: "",
   importCsv: "",
+  continueFromRunId: "",
 };
 
 /** Compile the editable fields into the exact options object sent to preview AND start. */
@@ -54,6 +61,7 @@ export function toRunOptions(fields: NewRunFields): RunRequestOptions {
   if (fields.locations.length > 0) inputs.locations = fields.locations;
   const limit = Number(fields.limit);
   if (fields.limit.trim().length > 0 && Number.isInteger(limit) && limit > 0) inputs.limit = limit;
+  if (fields.continueFromRunId.trim().length > 0) inputs.continueFromRunId = fields.continueFromRunId.trim();
 
   const overrides: CapabilityOverrides = { ...fields.overrides };
   if (!fields.findOwner) overrides.findOwner = false;

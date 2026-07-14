@@ -7,8 +7,11 @@ import type {
   EmailRole,
   EmailStatus,
   IdentifierType,
+  IdentityMatch,
   LeadsTable,
   LeadSourcesTable,
+  LineStatus,
+  LineType,
   PhoneRole,
 } from "../database-types.js";
 import { insertIdentityConflict } from "./identity-conflict-repo.js";
@@ -387,6 +390,105 @@ export async function listContactPoints(db: Kysely<Database>, leadId: string): P
     .where("lead_id", "=", leadId)
     .orderBy("created_at")
     .execute();
+}
+
+/**
+ * The sanctioned "current best signal" denormalization writer (M5): sets a
+ * validation signal TOGETHER with its checked_at + provider pair (the paired
+ * CHECK constraints make partial writes impossible). History stays append-only
+ * in contact_point_checks — this only moves the current-best columns.
+ */
+export async function updateContactPointSignals(
+  db: Kysely<Database>,
+  contactPointId: string,
+  patch: {
+    provider: string;
+    checkedAt: Date;
+    lineType?: LineType;
+    lineStatus?: LineStatus;
+    identityMatch?: IdentityMatch;
+    emailStatus?: Exclude<EmailStatus, "not_checked">;
+    formatValid?: boolean;
+    confidence?: number | null;
+  },
+): Promise<void> {
+  await db
+    .updateTable("contact_points")
+    .set({
+      ...(patch.lineType !== undefined
+        ? { line_type: patch.lineType, line_type_checked_at: patch.checkedAt, line_type_provider: patch.provider }
+        : {}),
+      ...(patch.lineStatus !== undefined
+        ? { line_status: patch.lineStatus, line_status_checked_at: patch.checkedAt, line_status_provider: patch.provider }
+        : {}),
+      ...(patch.identityMatch !== undefined
+        ? {
+            identity_match: patch.identityMatch,
+            identity_match_checked_at: patch.checkedAt,
+            identity_match_provider: patch.provider,
+          }
+        : {}),
+      ...(patch.emailStatus !== undefined
+        ? {
+            email_status: patch.emailStatus,
+            email_status_checked_at: patch.checkedAt,
+            email_status_provider: patch.provider,
+          }
+        : {}),
+      ...(patch.formatValid !== undefined
+        ? { format_valid: patch.formatValid, format_checked_at: patch.checkedAt }
+        : {}),
+      ...(patch.confidence !== undefined ? { confidence: patch.confidence } : {}),
+      updated_at: new Date(),
+    })
+    .where("id", "=", contactPointId)
+    .execute();
+}
+
+export async function findLeadByVerifiedEmail(
+  db: Kysely<Database>,
+  agencyId: string,
+  email: string,
+): Promise<LeadRow | undefined> {
+  return await db
+    .selectFrom("leads")
+    .selectAll()
+    .where("agency_id", "=", agencyId)
+    .where("verified_email", "=", email)
+    .executeTakeFirst();
+}
+
+/**
+ * The FIRST (and only) writer of leads.verified_email: an email_verification
+ * result of 'valid'. Mirrors setLeadIdentityKeys' conflict handling — an
+ * existing value on the lead is kept unchanged; another lead already holding
+ * the value flags an identity conflict and leaves the column NULL (never an
+ * automatic merge).
+ */
+export async function setVerifiedEmail(
+  db: Kysely<Database>,
+  args: { leadId: string; agencyId: string; runId?: string | null; email: string },
+): Promise<{ set: boolean; conflict: boolean }> {
+  const lead = await getLead(db, args.leadId);
+  if (!lead) throw new Error(`setVerifiedEmail: lead ${args.leadId} not found`);
+  if (lead.verified_email !== null) return { set: lead.verified_email === args.email, conflict: false };
+  const holder = await findLeadByVerifiedEmail(db, args.agencyId, args.email);
+  if (holder && holder.id !== args.leadId) {
+    await insertIdentityConflict(db, {
+      leadIdA: holder.id,
+      leadIdB: args.leadId,
+      identifierType: "verified_email",
+      identifierValue: args.email,
+      runId: args.runId ?? null,
+    });
+    return { set: false, conflict: true };
+  }
+  await db
+    .updateTable("leads")
+    .set({ verified_email: args.email, updated_at: new Date() })
+    .where("id", "=", args.leadId)
+    .execute();
+  return { set: true, conflict: false };
 }
 
 /** Append-only validation history. This repository exposes no UPDATE or DELETE for checks. */

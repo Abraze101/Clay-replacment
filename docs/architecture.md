@@ -88,7 +88,8 @@ web/                         Vite + React SPA client, built to web/dist and serv
     { "id": "dedupe", "type": "dedupe" },
     { "id": "website", "type": "research", "provider": "website", "profiles": ["call_ready", "full"] },
     { "id": "apollo", "type": "enrich", "provider": "apollo", "optional": true, "profiles": ["call_ready", "full"] },
-    { "id": "contact-check", "type": "enrich", "capability": "contact_validation", "profiles": ["call_ready", "full"] },
+    { "id": "find-phones", "type": "enrich", "capability": "phone_discovery", "profiles": ["call_ready", "full"] },
+    { "id": "validate-phones", "type": "enrich", "capability": "phone_validation", "profiles": ["call_ready", "full"] },
     { "id": "fit", "type": "score", "template": "local-service", "profiles": ["full"] },
     { "id": "copy", "type": "generate", "template": "agency-opener", "profiles": ["full"] },
     { "id": "review", "type": "review_gate" },
@@ -150,7 +151,7 @@ This lets an agency reuse the same engine as it moves from city-level prospectin
 | `identity_conflicts` | Flagged conflicting identifiers held for operator resolution instead of automatic merges. |
 | `contact_points` | Multiple phones/emails, their role, source, normalized value, and current best status. |
 | `contact_point_checks` | Append-only validation method, provider result, confidence, and checked-at history. |
-| `suppressions` | Entity-specific do-not-contact entries and operator review metadata (lands M5 with the call-readiness policy). |
+| `suppressions` | Entity-specific do-not-contact entries and operator review metadata (landed in 0005 with the call-readiness policy; release is an update, never a delete, and exports evaluate the list live). |
 | `lead_sources` | Provider IDs, retrieval metadata, and permitted source snapshot. |
 | `generated_outputs` | Score explanation, prompt version, evidence, and copy. |
 | `exports` | CSV/CRM result and idempotency state. |
@@ -204,11 +205,13 @@ Contact enrichment is capability-based rather than hard-coded to one vendor:
 
 For example, Twilio Lookup can normalize and validate number format and optionally return line type or line-status intelligence, while Apollo can reveal or waterfall additional person-level phones and emails. Neither result alone guarantees that a human will answer or that a number belongs to the intended owner. The engine persists the exact check performed instead of reducing every result to `verified: true`.
 
-The source waterfall stops when the campaign's acceptance rule is met—for example, a validated business main line for a local quick-call campaign, or a direct/mobile decision-maker number for an executive campaign. Duplicate results do not trigger repeated paid checks.
+As of M5 this is implemented as four capability step values on `enrich` steps — `phone_discovery`, `phone_validation`, `email_discovery`, `email_verification` — backed by three provider-interface families in `src/providers/capabilities.ts` (one discovery vendor serves both discovery capabilities via the request's wanted contact kinds). Async vendors deliver by submit-then-poll (ADR-029): the engine persists the vendor job id, defers the step, pauses the run `awaiting_provider` until the earliest poll is due, and re-polls on crash replay instead of re-submitting; no webhook receiver exists before M6. The deterministic call-readiness policy (`src/engine/policy/call-readiness.ts`) recomputes `run_items.call_readiness_status` inside every capability step's commit; export-time suppression evaluation stays separate and is never stored. Only an `email_verification` result of `valid` writes `leads.verified_email`.
+
+The source waterfall stops when the campaign's acceptance rule is met—for example, a validated business main line for a local quick-call campaign, or a direct/mobile decision-maker number for an executive campaign. Duplicate results do not trigger repeated paid checks: already-satisfied leads skip paid capability steps before a cap slot is booked, and fresh (≤30 days) validation signals are never re-purchased.
 
 ## Model-provider strategy
 
-MiniMax M3 is the likely first embedded model provider (Milestone 5), behind the same shared generation interface as the OpenAI and Anthropic adapters. It serves natural-language-to-typed-workflow drafts, preview explanations, company/website summaries, fit rationale, cold-call notes, personalized openers, and configuration assistance.
+MiniMax M3 is the likely first embedded model provider, behind the same shared generation interface as the OpenAI and Anthropic adapters — all three landed at M5 as plain-fetch adapters (ADR-032) with engine-owned prompts, versioned templates, and evidence grounding; the account/key decision stays with the owner (ADR-012). It serves natural-language-to-typed-workflow drafts, preview explanations, company/website summaries, fit rationale, cold-call notes, personalized openers, and configuration assistance.
 
 No model provider—MiniMax included—may:
 

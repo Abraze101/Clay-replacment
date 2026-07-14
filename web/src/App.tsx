@@ -11,7 +11,7 @@ export function App(): ReactElement {
   const route = useHashRoute();
   switch (route.name) {
     case "new":
-      return <NewRunWizard />;
+      return <NewRunWizard key={route.continueFrom ?? "new"} continueFrom={route.continueFrom} />;
     case "providers":
       return <ProviderSetupScreen />;
     case "run":

@@ -131,7 +131,8 @@ test("professional flow: full profile enriches ONLY approved rows within the cap
     const preview = await previewRun(t.app, slug, { profile: "full", cap: 3 });
     const enrichAction = preview.plan.estimatedPaidActions.find((a) => a.provider === "person-enrichment");
     assert.equal(enrichAction?.count, 3, "the cap bounds the estimated paid volume");
-    assert.equal(preview.plan.estimatedCost, 3);
+    // enrich 3×1 + phone discovery 3×5 + validation 3×2 + email verification 3×1.
+    assert.equal(preview.plan.estimatedCost, 27);
 
     const run = await startRun(t.app, slug, preview.approval.token, { profile: "full", cap: 3 });
     assert.equal(run.status, "waiting_review");
@@ -153,9 +154,10 @@ test("professional flow: full profile enriches ONLY approved rows within the cap
     assert.equal(finished.status, "completed");
 
     // The rejected row spent nothing and consumed NO cap slot: the cap admits
-    // the next three approved rows (ap-2..ap-4).
+    // the next three approved rows (ap-2..ap-4). Post-gate spend covers the
+    // full M5 contact chain: enrich 3 + discovery 15 + validation 6 + verify 3.
     assert.deepEqual(enricher.enrichedKeys.sort(), ["ap-2", "ap-3", "ap-4"]);
-    assert.equal(num(finished.credits_used), 3);
+    assert.equal(num(finished.credits_used), 27);
 
     const rejectedSteps = await listSteps(t.app.db.kysely, rejected.id);
     assert.equal(rejectedSteps.find((s) => s.step_id === "enrich")?.status, "skipped");
@@ -164,15 +166,17 @@ test("professional flow: full profile enriches ONLY approved rows within the cap
     const cappedSteps = await listSteps(t.app.db.kysely, capped!.id);
     assert.equal(cappedSteps.find((s) => s.step_id === "enrich")?.skip_reason, "paid_record_cap_reached");
 
-    // Enriched leads carry a work email that is found, NOT verified — with the
-    // provider's own claim kept only as metadata.
+    // Apollo's own email claim stays metadata; what upgraded the status to
+    // 'valid' is the ENGINE's M5 deliverability check (its provider recorded),
+    // which is also verified_email's first and only writer.
     const enrichedItem = items.find((i) => i.source_key === "ap-2");
     const contactPoints = await listContactPoints(t.app.db.kysely, enrichedItem?.lead_id as string);
     const email = contactPoints.find((cp) => cp.type === "email");
-    assert.equal(email?.email_status, "not_checked");
+    assert.equal(email?.email_status, "valid");
+    assert.equal(email?.email_status_provider, "fake-email-verification");
     assert.equal((email?.source_metadata as { providerClaimedStatus?: string }).providerClaimedStatus, "verified");
     const lead = await t.app.db.kysely.selectFrom("leads").selectAll().where("id", "=", enrichedItem!.lead_id!).executeTakeFirstOrThrow();
-    assert.equal(lead.verified_email, null, "verified_email has NO M4 writer");
+    assert.equal(lead.verified_email, email?.normalized_value, "set by the 'valid' deliverability result, not by Apollo's claim");
 
     // The export carries only approved rows: 4 approved of 5 (rejected row out).
     const csvPath = path.join(t.exportDir, `run-${run.id}.csv`);
@@ -203,7 +207,7 @@ test("professional flow: replaying the completed run repeats no enrichment", asy
     const again = await executeRun(t.app.runnerDeps, run.id);
     assert.equal(again.status, "completed");
     assert.equal(enricher.enrichedKeys.length, callsAfterFirst, "no second spend on replay");
-    assert.equal(num(again.credits_used), 3);
+    assert.equal(num(again.credits_used), 27, "enrich 3 + discovery 15 + validation 6 + verify 3, spent once");
   } finally {
     await t.teardown();
   }

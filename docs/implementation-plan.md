@@ -124,6 +124,8 @@ Acceptance:
 
 ## Milestone 5: contact enrichment and MiniMax assistance
 
+Amended at M5 planning (2026-07-13, ADR-029/ADR-030): no inbound webhook receiver before the M6 HTTPS deployment — async discovery vendors run submit-then-poll, and Apollo's webhook-only phone reveal stays deferred; ALL SIX benchmark candidate adapters were built up front (owner decision), so the ADR-008/009/010 vendor selections are env changes after the owner-run benchmarks (`docs/benchmarks-m5.md`).
+
 Deliver:
 
 - Quick List, Call-Ready, and Full Enrichment presets compiled into visible typed steps with per-capability overrides.

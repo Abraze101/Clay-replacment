@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { exportRunCsv, resumeRun, reviewRun, runResults } from "../src/app/run-service.js";
+import { suppress } from "../src/app/suppression-service.js";
 import { EXPORT_COLUMNS, renderCsv, type ExportRowData } from "../src/engine/export/csv.js";
 import { createDemoWorkflow, createTestApp, previewAndStart } from "./helpers/setup.js";
 
@@ -67,7 +68,7 @@ test("csv: export idempotency — no-op on unchanged dataset, fresh file after a
   }
 });
 
-test("csv: suppression_status is 'unchecked' in M0 — never rendered as cleared", async () => {
+test("csv: suppression_status is evaluated LIVE at export — cleared only after a real check, suppressed rows visible on quick lists", async () => {
   const t = await createTestApp();
   try {
     const slug = await createDemoWorkflow(t.app);
@@ -80,8 +81,19 @@ test("csv: suppression_status is 'unchecked' in M0 — never rendered as cleared
     const idx = columns.indexOf("suppression_status");
     assert.ok(idx >= 0);
     for (const line of lines.slice(1)) {
-      assert.equal(line.split(",")[idx], "unchecked");
+      assert.equal(line.split(",")[idx], "cleared", "every identifier was evaluated against the live suppression list");
     }
+
+    // A suppression added AFTER the export breaks the no-op and surfaces on
+    // the quick-list row (a discovery list keeps the row, visibly marked; the
+    // call-ready selection would exclude it).
+    await suppress(t.app, { scope: "phone", value: "(512) 555-0101", reason: "asked to never be contacted" });
+    const after = await exportRunCsv(t.app, run.id, false);
+    assert.equal(after.noop, false, "a fresh suppression always re-materializes the file");
+    const afterLines = readFileSync(after.filePath, "utf8").trimEnd().split("\r\n");
+    const suppressedRows = afterLines.slice(1).filter((l) => l.split(",")[idx] === "suppressed");
+    assert.equal(suppressedRows.length, 1);
+    assert.ok(suppressedRows[0]!.includes("Austin Roof Pros"));
   } finally {
     await t.teardown();
   }

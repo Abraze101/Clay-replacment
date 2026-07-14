@@ -6,6 +6,7 @@ import type {
   ApprovalEntry,
   AttemptClassification,
   AttemptCostEntry,
+  CallReadinessStatus,
   Database,
   DedupeStatus,
   EnrichmentProfile,
@@ -335,6 +336,10 @@ export async function updateRunItem(
     leadId?: string | null;
     currentStepId?: string | null;
     score?: number | null;
+    callReadinessStatus?: CallReadinessStatus | null;
+    callReadinessReason?: string | null;
+    /** M5 regeneration: a re-generated item returns to 'unreviewed' for a fresh decision. */
+    reviewStatus?: ReviewStatus;
     snapshot?: Record<string, unknown>;
     lastError?: Record<string, unknown> | null;
   },
@@ -348,6 +353,9 @@ export async function updateRunItem(
       ...(patch.leadId !== undefined ? { lead_id: patch.leadId } : {}),
       ...(patch.currentStepId !== undefined ? { current_step_id: patch.currentStepId } : {}),
       ...(patch.score !== undefined ? { score: patch.score } : {}),
+      ...(patch.callReadinessStatus !== undefined ? { call_readiness_status: patch.callReadinessStatus } : {}),
+      ...(patch.callReadinessReason !== undefined ? { call_readiness_reason: patch.callReadinessReason } : {}),
+      ...(patch.reviewStatus !== undefined ? { review_status: patch.reviewStatus } : {}),
       ...(patch.snapshot !== undefined ? { snapshot: assertBoundedJson(patch.snapshot, "run_items.snapshot") } : {}),
       ...(patch.lastError !== undefined
         ? { last_error: patch.lastError === null ? null : toJson(patch.lastError) }
@@ -573,6 +581,45 @@ export async function deferStepForRateLimit(
     .execute();
 }
 
+/** Persisted state of an async vendor job on a deferred capability step (result.capabilityJob). */
+export interface CapabilityJobState {
+  jobId: string;
+  provider: string;
+  /** The requestKey the job was submitted under — polls keep using it. */
+  requestKey: string;
+  submittedAt: string;
+  polls: number;
+}
+
+/**
+ * Defer a step waiting on an async vendor job (submit-then-poll, ADR-029):
+ * like a rate-limit deferral — back to `pending`, the attempt NOT consumed,
+ * next_attempt_at scheduled — plus the vendor job state merged into the
+ * step's result jsonb so crash replay re-polls instead of re-submitting.
+ */
+export async function deferStepForPoll(
+  db: Kysely<Database>,
+  stepRowId: string,
+  opts: { attempt: number; dueAt: Date; jobState: CapabilityJobState },
+): Promise<void> {
+  const step = await db
+    .selectFrom("run_item_steps")
+    .select(["result"])
+    .where("id", "=", stepRowId)
+    .executeTakeFirstOrThrow();
+  await db
+    .updateTable("run_item_steps")
+    .set({
+      status: "pending",
+      attempts: Math.max(0, opts.attempt - 1),
+      next_attempt_at: opts.dueAt,
+      result: assertBoundedJson({ ...step.result, capabilityJob: opts.jobState }, "run_item_steps.result"),
+      updated_at: new Date(),
+    })
+    .where("id", "=", stepRowId)
+    .execute();
+}
+
 /** Mark a step skipped (e.g. model_provider_not_configured, paid_record_cap_reached). */
 export async function skipStep(
   db: Kysely<Database>,
@@ -644,6 +691,63 @@ export async function reconcileStep(
     })
     .where("id", "=", stepRowId)
     .execute();
+}
+
+/**
+ * Requeue the generate steps of items marked review_status='regenerate' (M5):
+ * their ledger rows reset to pending (a fresh claim rotates the request key),
+ * completed items reopen so the runner revisits them, and the successful
+ * regeneration flips the review back to 'unreviewed' (executor commit).
+ * needs_review rows are untouchable here exactly as in requeueFailedSteps.
+ */
+export async function requeueRegenerateSteps(
+  db: Kysely<Database>,
+  runId: string,
+  generateStepIds: string[],
+): Promise<number> {
+  if (generateStepIds.length === 0) return 0;
+  const items = await db
+    .selectFrom("run_items")
+    .select(["id"])
+    .where("run_id", "=", runId)
+    .where("review_status", "=", "regenerate")
+    .execute();
+  if (items.length === 0) return 0;
+  const itemIds = items.map((i) => i.id);
+  const stepRows = await db
+    .selectFrom("run_item_steps")
+    .select(["id"])
+    .where("run_item_id", "in", itemIds)
+    .where("step_id", "in", generateStepIds)
+    .where("status", "in", ["completed", "skipped", "failed"])
+    .execute();
+  if (stepRows.length === 0) return 0;
+  await db
+    .updateTable("run_item_steps")
+    .set({
+      status: "pending",
+      attempts: 0,
+      skip_reason: null,
+      next_attempt_at: null,
+      last_error: null,
+      completed_at: null,
+      updated_at: new Date(),
+    })
+    .where(
+      "id",
+      "in",
+      stepRows.map((s) => s.id),
+    )
+    .execute();
+  // Reopen completed items so the runner's eligible list includes them
+  // (mirrors requeueFailedSteps' direct reopen).
+  await db
+    .updateTable("run_items")
+    .set({ status: "in_progress", updated_at: new Date() })
+    .where("id", "in", itemIds)
+    .where("status", "=", "completed")
+    .execute();
+  return stepRows.length;
 }
 
 /** Requeue failed steps for `run retry`. needs_review steps are deliberately excluded. */

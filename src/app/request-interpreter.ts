@@ -1,5 +1,4 @@
 import type { CapabilityOverrides } from "../engine/workflow-schema/overrides.js";
-import { M5_ONLY_OVERRIDES } from "../engine/workflow-schema/overrides.js";
 import type { Profile } from "../engine/workflow-schema/steps.js";
 
 /**
@@ -213,11 +212,6 @@ export function interpretRequest(text: string): InterpretedRequest {
 
   if (Object.keys(overrides).length > 0) {
     suggestions.overrides = { value: overrides, confidence: "medium", evidence: overrideEvidence.join("; ") };
-    for (const key of M5_ONLY_OVERRIDES) {
-      if (overrides[key] !== undefined) {
-        notes.push(`Capability '${key}' is recorded and bound to your approval, but its enrichment step arrives at Milestone 5.`);
-      }
-    }
   }
 
   return { suggestions, unmatched, notes };

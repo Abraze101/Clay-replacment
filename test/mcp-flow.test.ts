@@ -183,21 +183,21 @@ test("mcp flow: a budget/cap change through run_resume needs a fresh token from 
     const runId = (started.data as { runId: string }).runId;
     assert.equal((started.data as { status: string }).status, "paused");
 
-    const noToken = env(await client.callTool({ name: "run_resume", arguments: { runId, budget: 20 } }));
+    const noToken = env(await client.callTool({ name: "run_resume", arguments: { runId, budget: 40 } }));
     assert.equal(noToken.error?.code, "APPROVAL_REQUIRED");
     assert.deepEqual(noToken.nextActions, ["run_preview"], "the error tells the harness how to recover");
 
     const reapproval = env(
       await client.callTool({
         name: "run_preview",
-        arguments: { workflow: "local-service-demo", profile: "full", budget: 20 },
+        arguments: { workflow: "local-service-demo", profile: "full", budget: 40 },
       }),
     );
     const reapprovalData = reapproval.data as { approval: { token: string } };
     const resumed = env(
       await client.callTool({
         name: "run_resume",
-        arguments: { runId, budget: 20, approval: reapprovalData.approval.token },
+        arguments: { runId, budget: 40, approval: reapprovalData.approval.token },
       }),
     );
     assert.equal(resumed.ok, true);

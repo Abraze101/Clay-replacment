@@ -13,6 +13,9 @@
     { "id": "dedupe", "type": "dedupe" },
     { "id": "research", "type": "research", "provider": "website-research", "profiles": ["full"] },
     { "id": "owner", "type": "enrich", "provider": "person-enrichment", "optional": true, "profiles": ["call_ready", "full"] },
+    { "id": "find-phones", "type": "enrich", "capability": "phone_discovery", "profiles": ["call_ready", "full"] },
+    { "id": "validate-phones", "type": "enrich", "capability": "phone_validation", "profiles": ["call_ready", "full"] },
+    { "id": "verify-email", "type": "enrich", "capability": "email_verification", "profiles": ["full"] },
     { "id": "fit", "type": "score", "template": "imported-list" },
     { "id": "review", "type": "review_gate" },
     { "id": "export", "type": "export", "format": "csv" }
