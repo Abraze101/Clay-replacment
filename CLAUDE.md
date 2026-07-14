@@ -9,6 +9,7 @@ Read these documents before planning or changing code:
 - @docs/workflows.md
 - @docs/harness-compatibility.md
 - @docs/implementation-plan.md
+- @docs/closed-loop-product-testing.md
 - @docs/decisions.md
 - @docs/claude-handoff.md
 
