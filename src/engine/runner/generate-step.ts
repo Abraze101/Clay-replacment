@@ -13,8 +13,8 @@ import { GENERATION_TEMPLATES } from "../generation/templates.js";
 import type { GenerateStep } from "../workflow-schema/steps.js";
 import type { ExecCtx, ExecOutcome } from "./executors.js";
 
-/** Preference order when no provider is pinned and several are configured (ADR-012). */
-const MODEL_PREFERENCE = ["minimax", "openai", "anthropic", "fake-model"];
+/** Preference order when no provider is pinned and several are configured (ADR-012; OpenRouter is the owner's MiniMax route). */
+const MODEL_PREFERENCE = ["openrouter", "minimax", "openai", "anthropic", "fake-model"];
 
 export function resolveModelProvider(
   models: Map<string, ModelProvider>,

@@ -56,6 +56,7 @@ export async function createTestApp(
     LEADMAGIC_API_KEY: undefined,
     // Model registry stays empty unless a test opts into the fake model.
     GENERATE_MODEL_PROVIDER: undefined,
+    OPENROUTER_API_KEY: undefined,
     MINIMAX_API_KEY: undefined,
     OPENAI_API_KEY: undefined,
     ANTHROPIC_API_KEY: undefined,

@@ -146,6 +146,51 @@ test("minimax: one repair round-trip re-prompts with the validation error and re
   assert.match(stub.calls[1]!.body, /failed validation/, "the repair prompt carries the validation error");
 });
 
+test("openrouter: chat-completions with response_format json_schema; repair round-trip; in-body errors are operator-facing", async () => {
+  const { OpenRouterModelProvider } = await import("../src/providers/models/openrouter.js");
+  const okBody = {
+    id: "or_1",
+    choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+    usage: { prompt_tokens: 100, completion_tokens: 50 },
+  };
+
+  const stub = fetchStub([{ status: 200, body: okBody }]);
+  const provider = new OpenRouterModelProvider({ apiKey: SECRET, model: "minimax/minimax-m3", maxRequestsPerMinute: 6000, fetchImpl: stub.impl });
+  const outcome = await provider.generate(request());
+  assert.equal(outcome.kind, "ok");
+  if (outcome.kind === "ok") {
+    assert.deepEqual(outcome.output, VALID_OUTPUT);
+    assert.equal(outcome.usage.inputTokens, 100);
+  }
+  assert.match(stub.calls[0]!.url, /chat\/completions$/);
+  assert.match(stub.calls[0]!.body, /"response_format"/, "structured output requested via response_format");
+  assert.match(stub.calls[0]!.body, /"minimax\/minimax-m3"/);
+
+  // Repair path: broken JSON first, valid on the re-prompt.
+  const repairStub = fetchStub([
+    { status: 200, body: { id: "or_2", choices: [{ message: { content: "sure! {\"opener\": 2}" } }] } },
+    { status: 200, body: okBody },
+  ]);
+  const repairing = new OpenRouterModelProvider({ apiKey: SECRET, model: "minimax/minimax-m3", maxRequestsPerMinute: 6000, fetchImpl: repairStub.impl });
+  const repairedOutcome = await repairing.generate(request());
+  assert.equal(repairedOutcome.kind, "ok");
+  if (repairedOutcome.kind === "ok") assert.equal(repairedOutcome.repaired, true);
+  assert.match(repairStub.calls[1]!.body, /failed validation/);
+
+  // Upstream errors inside an HTTP 200 envelope are operator-facing, key never leaks.
+  const errStub = fetchStub([{ status: 200, body: { error: { code: 402, message: "Insufficient credits" } } }]);
+  const broke = new OpenRouterModelProvider({ apiKey: SECRET, model: "minimax/minimax-m3", maxRequestsPerMinute: 6000, fetchImpl: errStub.impl });
+  await assert.rejects(
+    () => broke.generate(request()),
+    (err: unknown) => {
+      const appErr = err as { code?: string; message?: string };
+      assert.equal(appErr.code, "PROVIDER_ERROR");
+      assert.ok(!(appErr.message ?? "").includes(SECRET));
+      return true;
+    },
+  );
+});
+
 test("minimax: base_resp throttle codes map to RateLimitError inside an HTTP 200", async () => {
   const stub = fetchStub([{ status: 200, body: { base_resp: { status_code: 1002, status_msg: "throttled" } } }]);
   const provider = new MiniMaxModelProvider({ apiKey: SECRET, model: "MiniMax-Test", maxRequestsPerMinute: 6000, fetchImpl: stub.impl });

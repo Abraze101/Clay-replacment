@@ -304,3 +304,12 @@ Milestone references use the canonical sequence: M0 engine skeleton, M1 harness 
 - **Reason:** One interface, one grounding enforcement point, one fixture-testing style; nothing model-provider-specific is architectural, and every M5 acceptance behavior works with generation disabled.
 - **Status:** accepted (MiniMax account/key remains the owner's pending ADR-012 decision)
 - **Revisit trigger:** The M5+ embedded assistant needing streaming/tool-use (SDKs earn their keep there), vendor structured-output API changes, or the owner's model-provider account decisions.
+
+## ADR-033: OpenRouter as the MiniMax route (amends ADR-012/ADR-032)
+
+- **Decision:** The embedded MiniMax model runs through OpenRouter (`src/providers/models/openrouter.ts`, provider name `openrouter`, default model `minimax/minimax-m3`) instead of a direct MiniMax account. OpenRouter exposes the OpenAI CHAT-COMPLETIONS surface, so it is a fourth adapter behind the same shared interface: structured output via `response_format json_schema` (MiniMax M3 supports it on OpenRouter) plus the schema-in-prompt fallback and one repair round-trip; the engine's Zod schema stays the trust boundary. Preference order when GENERATE_MODEL_PROVIDER is unset: openrouter > minimax > openai > anthropic. The direct MiniMax adapter stays as the fallback path if OpenRouter routing/pricing degrades.
+- **Date:** 2026-07-13
+- **Evidence:** Owner decision ("setup the OpenRouter account for MiniMax"). openrouter.ai lists `minimax/minimax-m3` with structured-output support at ~$0.30/M input, $1.20/M output; fixture contract test `test/model-adapters.test.ts` (openrouter case) covers the structured request, repair path, and in-body error envelope.
+- **Reason:** One account/key covers MiniMax today and any future model swap (the model id is an env var), with OpenAI-compatible semantics we already exercise; no direct MiniMax billing relationship needed.
+- **Status:** accepted (owner creates the account/key; ADR-012's "MiniMax first" intent is satisfied via this route)
+- **Revisit trigger:** OpenRouter pricing/routing/availability problems for MiniMax models, or the embedded assistant needing features OpenRouter does not pass through.

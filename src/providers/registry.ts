@@ -16,6 +16,7 @@ import { FakeSourceProvider } from "./fake/source.js";
 import { AnthropicModelProvider } from "./models/anthropic.js";
 import { MiniMaxModelProvider } from "./models/minimax.js";
 import { OpenAiModelProvider } from "./models/openai.js";
+import { OpenRouterModelProvider } from "./models/openrouter.js";
 import { FirecrawlClient } from "./firecrawl/client.js";
 import { FirecrawlWebsiteResearch } from "./firecrawl/website-research.js";
 import { ImportedListSource } from "./imported/source.js";
@@ -200,6 +201,14 @@ export function buildRegistry(env: Env, options: RegistryOptions): ProviderRegis
     const fakeModel = new FakeModelProvider();
     registry.models.set(fakeModel.name, fakeModel);
   } else {
+    if ((modelSelection === undefined || modelSelection === "openrouter") && env.OPENROUTER_API_KEY) {
+      const openrouter = new OpenRouterModelProvider({
+        apiKey: env.OPENROUTER_API_KEY,
+        baseUrl: env.OPENROUTER_BASE_URL,
+        model: env.OPENROUTER_MODEL,
+      });
+      registry.models.set(openrouter.name, openrouter);
+    }
     if ((modelSelection === undefined || modelSelection === "minimax") && env.MINIMAX_API_KEY) {
       const minimax = new MiniMaxModelProvider({
         apiKey: env.MINIMAX_API_KEY,

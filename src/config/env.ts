@@ -93,9 +93,15 @@ const envSchema = z.object({
   LEADMAGIC_DEFAULT_RETRY_AFTER_SECONDS: z.coerce.number().int().min(1).max(3600).default(60),
   // ── M5 model providers (one shared generation interface; ADR-012/ADR-032).
   // 'fake' registers the deterministic fake model; unset with multiple keys
-  // present prefers minimax > openai > anthropic. Generation is optional:
-  // every workflow still runs with no model provider configured.
-  GENERATE_MODEL_PROVIDER: z.enum(["minimax", "openai", "anthropic", "fake"]).optional(),
+  // present prefers openrouter > minimax > openai > anthropic (OpenRouter is
+  // the owner's chosen MiniMax route). Generation is optional: every workflow
+  // still runs with no model provider configured.
+  GENERATE_MODEL_PROVIDER: z.enum(["openrouter", "minimax", "openai", "anthropic", "fake"]).optional(),
+  // OpenRouter (owner decision 2026-07-13): MiniMax M3 via OpenRouter's
+  // OpenAI-compatible chat-completions API — no direct MiniMax account.
+  OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
+  OPENROUTER_MODEL: z.string().min(1).default("minimax/minimax-m3"),
   MINIMAX_API_KEY: z.string().optional(),
   MINIMAX_BASE_URL: z.string().url().default("https://api.minimax.io"),
   MINIMAX_MODEL: z.string().min(1).default("MiniMax-M3"),
